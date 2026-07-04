@@ -1,0 +1,14 @@
+{
+  "name": "chronomap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive timeline-map across three fictional universes. Zero runtime dependencies — the app is a single index.html.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

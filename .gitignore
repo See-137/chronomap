@@ -1,0 +1,12 @@
+# Node / test tooling (dev-only; the app itself stays zero-dependency)
+node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# Claude Code harness cruft
+.claude/

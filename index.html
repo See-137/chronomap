@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Chronomap — Fictional Universes Timeline Map</title>
 <meta name="description" content="Interactive timeline-map across three fictional universes: Middle-earth, Wizarding Britain, and The Matrix. Non-WebGL 2D tier." />
+<!-- Defense-in-depth for a static single-file app. GitHub Pages can't set real HTTP
+     headers, so this <meta> CSP is the only lever. Inline script/style require
+     'unsafe-inline'; there is no attacker-reachable HTML sink today (all innerHTML is
+     fed by the hardcoded UNIVERSES data + escaped via esc()), so this guards future edits. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
 <style>
   /* ============================================================
      Chronomap — data-driven multi-universe engine, 2D (SVG) tier.
@@ -12,7 +17,7 @@
      per-universe theme tokens (applied to :root at runtime) so a world
      swap is a token swap, not a layout change. Zero dependencies.
 
-     Separation rule (see DESIGN.md §2.4):
+     Separation rule (design docs: See-137/.github → apps/timeline-map):
        universe            -> separate map (own layers[], theme, timeline)
        book vs film        -> SAME map, `source` tag + canon toggle
        in-world alt space  -> separate MapLayer within the universe
@@ -114,6 +119,22 @@
   }
   aside.detail.open { transform:translateX(0); }
   .reduced aside.detail { transition:none; }
+
+  /* Visible keyboard-focus indicator for the focusable SVG map controls
+     (location/event <g> nodes) and all interactive chrome. */
+  svg.map g:focus-visible { outline:none; }
+  svg.map g:focus-visible circle:first-of-type { stroke:var(--u-playhead); stroke-width:3px; }
+  button:focus-visible, .chip:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline:2px solid var(--u-primary); outline-offset:2px;
+  }
+  .search-results button[aria-selected="true"] { background:var(--u-panel-2); outline:2px solid var(--u-primary); outline-offset:-2px; }
+
+  /* Low-power / reduced-effects tier (renderToggle). Honestly backs the toast:
+     kills the expensive SVG turbulence filter, camera easing, and CSS transitions. */
+  .low-power *, .low-power aside.detail, .low-power body, .low-power header.topbar, .low-power footer.timeline {
+    transition:none !important;
+  }
+  .low-power .track .tick { transition:none !important; }
   .detail header { display:flex; align-items:flex-start; gap:10px; padding:16px 16px 10px; border-bottom:1px solid color-mix(in srgb, var(--u-line) 40%, transparent); }
   .detail header .kind { font-size:10px; text-transform:uppercase; letter-spacing:.8px; padding:3px 7px; border-radius:6px; background:var(--u-header-bg); color:var(--u-primary); align-self:center; }
   .detail h2 { font-family:var(--font-serif); margin:0; font-size:20px; line-height:1.15; }
@@ -167,6 +188,13 @@
 </style>
 </head>
 <body>
+<noscript>
+  <div style="max-width:640px;margin:12vh auto;padding:24px;font-family:system-ui,sans-serif;line-height:1.5;text-align:center;color:#241a10;">
+    <h1 style="font-family:Georgia,serif;">Chronomap</h1>
+    <p>This interactive timeline-map needs JavaScript to run. Please enable JavaScript to explore
+    Middle-earth, Wizarding Britain, and The Matrix.</p>
+  </div>
+</noscript>
 <div class="app" id="app">
 
   <header class="topbar">
@@ -174,13 +202,14 @@
     <nav class="universe-switch" aria-label="Universe" id="universeSwitch"></nav>
     <div class="search">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-      <input id="searchInput" type="text" placeholder="Search events, places, people…" autocomplete="off" aria-label="Search" />
-      <div class="search-results" id="searchResults" role="listbox"></div>
+      <input id="searchInput" type="text" placeholder="Search events, places, people…" autocomplete="off" aria-label="Search"
+             role="combobox" aria-expanded="false" aria-controls="searchResults" aria-autocomplete="list" />
+      <div class="search-results" id="searchResults" role="listbox" aria-label="Search results"></div>
     </div>
   </header>
 
   <div class="stage" id="stage">
-    <svg class="map" id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Map">
+    <svg class="map" id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" role="group" aria-label="Interactive map — locations and events are focusable">
       <defs>
         <radialGradient id="mapbg" cx="45%" cy="35%" r="80%">
           <stop offset="0%" style="stop-color:var(--u-map-1)"/><stop offset="100%" style="stop-color:var(--u-map-2)"/>
@@ -223,7 +252,7 @@
       <button id="zin" aria-label="Zoom in">＋</button>
       <button id="zout" aria-label="Zoom out">－</button>
       <button id="zreset" aria-label="Reset view" title="Reset view">⟳</button>
-      <button class="render-toggle" id="renderToggle" title="Simulate no-WebGL / low-power">2D ✓</button>
+      <button class="render-toggle" id="renderToggle" title="Simulate no-WebGL / low-power" aria-pressed="false">2D ✓</button>
     </div>
 
     <aside class="detail" id="detail" aria-live="polite">
@@ -520,12 +549,17 @@ const state = {
 };
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 if(reduced) document.body.classList.add("reduced");
+const lowPower = () => document.body.classList.contains("low-power");
 
 const U = () => UNIVERSES[state.universe];
 const byId=(arr,id)=>arr.find(o=>o.id===id);
 const loc = id => byId(U().locations,id);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,f)=>a+(b-a)*f;
+/* HTML-escape for the few innerHTML template sites. All interpolated text today comes
+   from the hardcoded UNIVERSES data, but escaping makes those sinks safe by construction
+   if the data source ever becomes dynamic (fetched JSON, user headcanon, etc.). */
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 function labelForT(t){ const A=U().dateAnchors; let best=A[0]; for(const a of A){ if(t>=a[0]) best=a; } return best[1]; }
 
@@ -543,7 +577,8 @@ function readURL(){
   if(p.has("kinds")) state.activeKinds=new Set(p.get("kinds").split(",").filter(Boolean));
   state.activeChars=new Set(u.characters.map(c=>c.id));
   if(p.has("chars")) state.activeChars=new Set(p.get("chars").split(",").filter(Boolean));
-  if(p.has("cam")){ const [x,y,z]=p.get("cam").split(",").map(Number); if(!isNaN(x)) state.cam={x,y,z:z||1}; }
+  if(p.has("cam")){ const [x,y,z]=p.get("cam").split(",").map(Number);
+    if(![x,y,z].some(Number.isNaN)) state.cam={x:clamp(x,0,1),y:clamp(y,0,1),z:clamp(z||1,1,4)}; }  // validate all 3; a bad y/z blanks the map
 }
 let urlTimer;
 function writeURL(){
@@ -565,12 +600,17 @@ function writeURL(){
 
 /* ---- DOM ---- */
 const el=id=>document.getElementById(id);
+const setCurrent=(node,on)=>on?node.setAttribute("aria-current","true"):node.removeAttribute("aria-current");
 const camG=el("cam"), gTerrain=el("terrain"), gRoutes=el("routes"), gLoc=el("locations"), gEvt=el("events"), mapEl=el("map");
 
 /* =====================================================================
    RENDER
    ===================================================================== */
-function buildTerrain(){ gTerrain.innerHTML=""; TERRAIN[state.universe](gTerrain, state.layer); }
+function buildTerrain(){
+  gTerrain.innerHTML=""; TERRAIN[state.universe](gTerrain, state.layer);
+  // Low-power tier: drop the GPU-heavy SVG turbulence/displacement filter on terrain.
+  if(lowPower()) gTerrain.querySelectorAll("[filter]").forEach(n=>n.removeAttribute("filter"));
+}
 
 function buildLocations(){
   gLoc.innerHTML="";
@@ -618,7 +658,8 @@ function renderRoutes(){
 }
 function visibleEvents(){
   return U().events.filter(ev=>{
-    if(loc(ev.loc).layer!==state.layer) return false;
+    const L=loc(ev.loc);
+    if(!L || L.layer!==state.layer) return false;   // guard: skip events whose loc id is missing/mismatched
     if(state.canonOnly && ev.source!=="canon") return false;
     if(!state.activeKinds.has(ev.kind)) return false;
     return true;
@@ -627,7 +668,8 @@ function visibleEvents(){
 function renderEvents(){
   gEvt.innerHTML="";
   visibleEvents().forEach(ev=>{
-    const L=loc(ev.loc), passed=state.now>=ev.t-.001, sel=state.selectedEvent===ev.id, interp=ev.source!=="canon";
+    const L=loc(ev.loc); if(!L) return;             // visibleEvents already guards, but stay defensive
+    const passed=state.now>=ev.t-.001, sel=state.selectedEvent===ev.id, interp=ev.source!=="canon";
     const g=E("g",{transform:`translate(${L.x},${L.y})`,opacity:passed?1:.28}); g.style.cursor="pointer";
     g.setAttribute("tabindex","0"); g.setAttribute("role","button"); g.setAttribute("aria-label",`Event: ${ev.title}, ${ev.date}`);
     const r=4+ev.importance*1.1, col=interp?"var(--u-danger)":"var(--u-primary)";
@@ -646,7 +688,7 @@ let camAnim=null;
 function applyCam(){ const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700; camG.setAttribute("transform",`translate(${1000/2-cx*z},${700/2-cy*z}) scale(${z})`); }
 function flyTo(nx,ny,nz,cb){
   const from={...state.cam}, to={x:nx,y:ny,z:nz};
-  if(reduced){ state.cam=to; applyCam(); cb&&cb(); return; }
+  if(reduced || lowPower()){ state.cam=to; applyCam(); writeURL(); cb&&cb(); return; }  // no easing in reduced/low-power
   if(camAnim) cancelAnimationFrame(camAnim);
   let start=null;
   (function step(ts){ if(start===null)start=ts; const f=clamp((ts-start)/650,0,1), e=1-Math.pow(1-f,3);
@@ -661,8 +703,8 @@ function ensureLayerFor(id){ const L=loc(id); if(L && L.layer!==state.layer){ se
 function selectEvent(id){
   const ev=byId(U().events,id); if(!ev) return;
   ensureLayerFor(ev.loc);
+  const L=loc(ev.loc); if(!L) return;               // guard: bad loc id shouldn't crash the flyTo/render
   state.selectedEvent=id;
-  const L=loc(ev.loc);
   setNow(ev.t,{fromSelect:true});
   flyTo(L.x/1000,L.y/700,2.0);
   openEventDetail(ev); render(); writeURL();
@@ -674,45 +716,58 @@ function selectLocation(id){
   const evts=U().events.filter(e=>e.loc===id);
   const chars=[...new Set(evts.flatMap(e=>e.chars))];
   openDetail({kind:"Location",title:L.name,when:byId(U().factions,L.faction)?.name||"",
-    bodyHTML:`<p>${L.blurb}</p>
-      ${evts.length?`<div class="section-label">Events here</div><div class="link-list">${evts.map(e=>`<button data-ev="${e.id}">${e.title}</button>`).join("")}</div>`:""}
-      ${chars.length?`<div class="section-label">Who passes through</div><div class="link-list">${chars.map(c=>`<button data-ch="${c}">${byId(U().characters,c).name}</button>`).join("")}</div>`:""}`});
+    bodyHTML:`<p>${esc(L.blurb)}</p>
+      ${evts.length?`<div class="section-label">Events here</div><div class="link-list">${evts.map(e=>`<button data-ev="${esc(e.id)}">${esc(e.title)}</button>`).join("")}</div>`:""}
+      ${chars.length?`<div class="section-label">Who passes through</div><div class="link-list">${chars.map(c=>{const cc=byId(U().characters,c);return cc?`<button data-ch="${esc(c)}">${esc(cc.name)}</button>`:"";}).join("")}</div>`:""}`});
   writeURL();
 }
 function selectCharacter(id){
   const ch=byId(U().characters,id); if(!ch) return;
   state.selectedChar = state.selectedChar===id ? null : id;
-  state.activeChars.add(id);
   if(state.selectedChar){
+    state.activeChars.add(id);                        // only force-visible when actually selecting, not when clearing
     const routes=U().routes.filter(r=>r.characterId===id);
     const wp=routes.flatMap(r=>r.waypoints.map(w=>[...w,r.layer]));
     openDetail({kind:"Character",title:ch.name,when:ch.role,
-      bodyHTML:`<p>${ch.blurb}</p>
+      bodyHTML:`<p>${esc(ch.blurb)}</p>
         <div class="section-label">Journey — scrub the timeline to trace the path</div>
-        <div class="link-list">${wp.map(([lid,wt,lay])=>`<button data-jump="${wt}" data-loc="${lid}">${loc(lid)?.name||lid}</button>`).join("")}</div>`});
+        <div class="link-list">${wp.map(([lid,wt,lay])=>`<button data-jump="${esc(wt)}" data-loc="${esc(lid)}">${esc(loc(lid)?.name||lid)}</button>`).join("")}</div>`});
   }
   render(); writeURL();
 }
-function openEventDetail(ev){
+function openEventDetail(ev, opts){
   const chars=ev.chars.map(c=>byId(U().characters,c)).filter(Boolean);
   const factions=ev.factions.map(f=>byId(U().factions,f)).filter(Boolean);
   const tag = ev.source==="canon"?"Canon":ev.source==="interpretation"?"≈ Interpretation":"Adaptation";
+  const L=loc(ev.loc);                               // may be undefined for malformed data — guard the "At" row
   openDetail({kind:ev.kind.replace("-"," "),title:ev.title,when:ev.date,
-    bodyHTML:`<span class="badge ${ev.source}">${tag}</span>
-      <p style="margin-top:10px">${ev.summary}</p>
-      <div class="section-label">At</div><div class="link-list"><button data-loc="${ev.loc}">${loc(ev.loc).name}</button></div>
-      ${chars.length?`<div class="section-label">Characters</div><div class="link-list">${chars.map(c=>`<button data-ch="${c.id}">${c.name}</button>`).join("")}</div>`:""}
-      ${factions.length?`<div class="section-label">Factions</div><div class="link-list">${factions.map(f=>`<span class="badge" style="background:${f.color}22;color:${f.color};border:1px solid ${f.color}">${f.name}</span>`).join(" ")}</div>`:""}`});
+    bodyHTML:`<span class="badge ${esc(ev.source)}">${esc(tag)}</span>
+      <p style="margin-top:10px">${esc(ev.summary)}</p>
+      ${L?`<div class="section-label">At</div><div class="link-list"><button data-loc="${esc(ev.loc)}">${esc(L.name)}</button></div>`:""}
+      ${chars.length?`<div class="section-label">Characters</div><div class="link-list">${chars.map(c=>`<button data-ch="${esc(c.id)}">${esc(c.name)}</button>`).join("")}</div>`:""}
+      ${factions.length?`<div class="section-label">Factions</div><div class="link-list">${factions.map(f=>`<span class="badge" style="background:${esc(f.color)}22;color:${esc(f.color)};border:1px solid ${esc(f.color)}">${esc(f.name)}</span>`).join(" ")}</div>`:""}`}, opts);
 }
-function openDetail({kind,title,when,bodyHTML}){
+/* Track what had focus before the panel opened so we can restore it on close (a11y). */
+let detailReturnFocus=null;
+function openDetail({kind,title,when,bodyHTML}, opts={}){
+  const wasOpen=el("detail").classList.contains("open");
+  if(!wasOpen && document.activeElement && document.activeElement!==document.body) detailReturnFocus=document.activeElement;
   el("dKind").textContent=kind; el("dTitle").textContent=title; el("dWhen").textContent=when||"";
   el("dBody").innerHTML=bodyHTML; el("detail").classList.add("open");
   el("dBody").querySelectorAll("[data-ev]").forEach(b=>b.onclick=()=>selectEvent(b.dataset.ev));
   el("dBody").querySelectorAll("[data-ch]").forEach(b=>b.onclick=()=>selectCharacter(b.dataset.ch));
   el("dBody").querySelectorAll("[data-loc]").forEach(b=>b.onclick=()=>selectLocation(b.dataset.loc));
   el("dBody").querySelectorAll("[data-jump]").forEach(b=>b.onclick=()=>{ ensureLayerFor(b.dataset.loc); setNow(parseFloat(b.dataset.jump)); const L=loc(b.dataset.loc); if(L) flyTo(L.x/1000,L.y/700,1.9); render(); });
+  // Move focus into the panel on first open — but NOT on a boot-time deep link,
+  // where stealing focus before any user interaction is an a11y anti-pattern.
+  if(!wasOpen && !opts.skipFocus) el("dClose").focus();
 }
-el("dClose").onclick=()=>{ el("detail").classList.remove("open"); state.selectedEvent=null; state.selectedChar=null; render(); writeURL(); };
+function closeDetail(){
+  el("detail").classList.remove("open"); state.selectedEvent=null; state.selectedChar=null; render(); writeURL();
+  if(detailReturnFocus && document.contains(detailReturnFocus)){ detailReturnFocus.focus(); }
+  detailReturnFocus=null;
+}
+el("dClose").onclick=closeDetail;
 
 /* =====================================================================
    TIMELINE
@@ -748,11 +803,13 @@ function buildTicks(){
 function markTicks(){ track.querySelectorAll(".tick").forEach(t=>{ t.dataset.passed=(state.now>=parseFloat(t.dataset.t)-.001); t.classList.toggle("sel",t.dataset.ev===state.selectedEvent); }); }
 
 /* ---- playback ---- */
-let raf=null,last=null;
-function play(){ if(state.now>=1) setNow(0); state.playing=true; el("play").textContent="❚❚"; el("play").setAttribute("aria-label","Pause"); last=null; raf=requestAnimationFrame(tick); }
+let raf=null,last=null,acc=0;
+function play(){ if(state.now>=1) setNow(0); state.playing=true; el("play").textContent="❚❚"; el("play").setAttribute("aria-label","Pause"); last=null; acc=0; raf=requestAnimationFrame(tick); }
 function pause(){ state.playing=false; el("play").textContent="▶"; el("play").setAttribute("aria-label","Play"); if(raf)cancelAnimationFrame(raf); raf=null; }
 function tick(ts){ if(!state.playing) return; if(last===null)last=ts; const dt=(ts-last)/1000; last=ts;
-  setNow(state.now+(dt/90)*state.speed);
+  // Low-power tier: coalesce advances to ~8fps so the full SVG rebuild in setNow runs far less often.
+  if(lowPower()){ acc+=dt; if(acc<0.125){ raf=requestAnimationFrame(tick); return; } setNow(state.now+(acc/90)*state.speed); acc=0; }
+  else setNow(state.now+(dt/90)*state.speed);
   if(state.now>=1){ pause(); toast(U().axisTo.split("—").pop().trim()); return; } raf=requestAnimationFrame(tick); }
 el("play").onclick=()=> state.playing?pause():play();
 el("speed").onclick=()=>{ const s=[1,2,4,.5]; state.speed=s[(s.indexOf(state.speed)+1)%s.length]; el("speed").textContent=state.speed+"×"; };
@@ -763,7 +820,7 @@ el("speed").onclick=()=>{ const s=[1,2,4,.5]; state.speed=s[(s.indexOf(state.spe
 function buildUniverseSwitch(){
   const nav=el("universeSwitch"); nav.innerHTML="";
   Object.values(UNIVERSES).forEach(u=>{
-    const b=document.createElement("button"); b.textContent=u.name; b.setAttribute("aria-current", u.id===state.universe);
+    const b=document.createElement("button"); b.textContent=u.name; setCurrent(b, u.id===state.universe);
     b.onclick=()=>setUniverse(u.id); nav.appendChild(b);
   });
 }
@@ -798,7 +855,13 @@ el("canonToggle").querySelector("input").onchange=e=>{ state.canonOnly=e.target.
 el("zin").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z*1.4,1,4));
 el("zout").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z/1.4,1,4));
 el("zreset").onclick=()=>flyTo(.4,.4,1);
-el("renderToggle").onclick=()=>{ document.body.classList.toggle("low-power"); const low=document.body.classList.contains("low-power"); el("renderToggle").textContent=low?"2D · low":"2D ✓"; toast(low?"Low-power tier: motion & effects reduced":"Standard 2D tier"); };
+el("renderToggle").onclick=()=>{
+  const low=document.body.classList.toggle("low-power");
+  el("renderToggle").textContent=low?"2D · low":"2D ✓";
+  el("renderToggle").setAttribute("aria-pressed", low?"true":"false");
+  buildTerrain();  // re-render terrain with/without the turbulence filter
+  toast(low?"Low-power tier: motion & effects reduced":"Standard 2D tier");
+};
 
 /* ---- universe / layer switching ---- */
 function applyUniverseChrome(){
@@ -809,7 +872,7 @@ function applyUniverseChrome(){
   el("mapNote").textContent = u.note || "Geography is stylized & interpretive — relative topology, not real coordinates.";
   el("canonToggle").querySelector("input").checked=state.canonOnly;
   buildUniverseSwitch(); buildLayerChips(); buildChips();
-  document.querySelectorAll(".universe-switch button").forEach(b=>b.setAttribute("aria-current", b.textContent===u.name));
+  document.querySelectorAll(".universe-switch button").forEach(b=>setCurrent(b, b.textContent===u.name));
 }
 function setUniverse(id, opts={}){
   if(id===state.universe && !opts.force) return;
@@ -850,16 +913,34 @@ function buildSearchIndex(){ return [
   ...U().locations.map(l=>({label:l.name,sub:"Location",act:()=>selectLocation(l.id)})),
   ...U().characters.map(c=>({label:c.name,sub:c.role,act:()=>selectCharacter(c.id)})),
 ]; }
-let searchIdx=[];
-searchInput.addEventListener("input",()=>{
+let searchIdx=[], searchHits=[], searchActive=-1;
+function closeSearch(){ searchResults.classList.remove("open"); searchInput.setAttribute("aria-expanded","false"); searchActive=-1; }
+function highlightSearch(){
+  const opts=searchResults.querySelectorAll('[role="option"]');
+  opts.forEach((o,i)=>o.setAttribute("aria-selected", i===searchActive?"true":"false"));
+  if(searchActive>=0 && opts[searchActive]) opts[searchActive].scrollIntoView({block:"nearest"});
+}
+function runSearch(){
   const q=searchInput.value.toLowerCase().trim();
-  if(!q){ searchResults.classList.remove("open"); return; }
-  const hits=searchIdx.filter(i=>i.label.toLowerCase().includes(q)).slice(0,8);
-  searchResults.innerHTML=hits.map((h,i)=>`<button data-i="${i}">${h.label} <small>· ${h.sub}</small></button>`).join("")||`<button disabled>No matches</button>`;
-  searchResults.classList.add("open");
-  searchResults.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{ hits[b.dataset.i].act(); searchResults.classList.remove("open"); searchInput.value=""; });
+  if(!q){ closeSearch(); return; }
+  searchHits=searchIdx.filter(i=>i.label.toLowerCase().includes(q)).slice(0,8);
+  searchActive=-1;
+  searchResults.innerHTML = searchHits.length
+    ? searchHits.map((h,i)=>`<button role="option" id="searchOpt${i}" aria-selected="false" data-i="${i}">${esc(h.label)} <small>· ${esc(h.sub)}</small></button>`).join("")
+    : `<button role="option" aria-disabled="true" disabled>No matches</button>`;
+  searchResults.classList.add("open"); searchInput.setAttribute("aria-expanded","true");
+  searchResults.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>chooseSearch(+b.dataset.i));
+}
+function chooseSearch(i){ const h=searchHits[i]; if(!h) return; h.act(); closeSearch(); searchInput.value=""; }
+searchInput.addEventListener("input",runSearch);
+searchInput.addEventListener("keydown",e=>{
+  const open=searchResults.classList.contains("open");
+  if(e.key==="ArrowDown"){ if(!open){ runSearch(); return; } e.preventDefault(); searchActive=Math.min(searchActive+1,searchHits.length-1); highlightSearch(); }
+  else if(e.key==="ArrowUp"){ if(!open) return; e.preventDefault(); searchActive=Math.max(searchActive-1,0); highlightSearch(); }
+  else if(e.key==="Enter"){ if(open && searchHits.length){ e.preventDefault(); chooseSearch(searchActive>=0?searchActive:0); } }
+  else if(e.key==="Escape"){ if(open){ e.stopPropagation(); closeSearch(); } }
 });
-document.addEventListener("click",e=>{ if(!e.target.closest(".search")) searchResults.classList.remove("open"); });
+document.addEventListener("click",e=>{ if(!e.target.closest(".search")) closeSearch(); });
 
 /* ---- keyboard ---- */
 document.addEventListener("keydown",e=>{
@@ -867,7 +948,7 @@ document.addEventListener("keydown",e=>{
   if(e.key===" "){ e.preventDefault(); state.playing?pause():play(); }
   if(e.key==="ArrowRight"){ pause(); setNow(state.now+.02); }
   if(e.key==="ArrowLeft"){ pause(); setNow(state.now-.02); }
-  if(e.key==="Escape") el("dClose").click();
+  if(e.key==="Escape" && el("detail").classList.contains("open")) closeDetail();
 });
 
 /* ---- toast ---- */
@@ -884,7 +965,7 @@ function boot(){
   searchIdx=buildSearchIndex();
   buildTerrain(); buildLocations(); buildTicks();
   applyCam(); setNow(state.now,{fromSelect:true}); render();
-  if(state.selectedEvent){ const ev=byId(U().events,state.selectedEvent); if(ev){ ensureLayerFor(ev.loc); openEventDetail(ev); el("detail").classList.add("open"); buildLocations(); buildTicks(); render(); } }
+  if(state.selectedEvent){ const ev=byId(U().events,state.selectedEvent); if(ev){ ensureLayerFor(ev.loc); openEventDetail(ev,{skipFocus:true}); buildLocations(); buildTicks(); render(); } }
   else if(state.selectedChar) selectCharacter(state.selectedChar);
   toast("Switch worlds up top · scrub or press ▶ to watch a journey unfold");
 }
