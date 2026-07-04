@@ -290,7 +290,8 @@
     </svg>
     <div class="vignette" id="vignette" aria-hidden="true"></div>
 
-    <div class="minimap" id="minimap" title="Overview — click to jump">
+    <div class="minimap" id="minimap" title="Overview — click to jump" role="button" tabindex="0"
+         aria-label="Map overview — click to jump, or use arrow keys to pan and +/- to zoom">
       <svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="Map overview">
         <rect x="0" y="0" width="1000" height="700" fill="var(--u-map-2)" opacity="0.5"/>
         <path id="mmLand" d="" fill="var(--u-land)" stroke="var(--u-land-stroke)" stroke-width="4" opacity="0.85"/>
@@ -795,6 +796,11 @@ function readURL(){
   state.layer = u.layers[0].id;
   if(p.has("layer") && u.layers.some(l=>l.id===p.get("layer"))) state.layer=p.get("layer");
   if(p.has("t")) state.now=clamp(parseFloat(p.get("t"))||0,0,1);
+  // SECURITY: event/char/kinds/chars are stored raw but are ONLY ever consumed as
+  // byId() lookup keys / Set-membership tests (gated by `if(ev)`/`if(ch)`), never
+  // rendered. Do NOT introduce a path that puts a raw, unmatched id into the DOM
+  // (e.g. an "Event \"${id}\" not found" message) without esc()-ing it first —
+  // that would turn these params into the app's first XSS sink.
   if(p.has("event")) state.selectedEvent=p.get("event");
   if(p.has("char")) state.selectedChar=p.get("char");
   if(p.has("canon")) state.canonOnly=p.get("canon")==="only";
@@ -881,7 +887,7 @@ function renderRoutes(){
   U().routes.forEach(route=>{
     if(route.layer!==state.layer) return;
     const ch=byId(U().characters,route.characterId);
-    if(!state.activeChars.has(ch.id)) return;
+    if(!ch || !state.activeChars.has(ch.id)) return;   // guard: skip routes whose character id is missing/mismatched
     const hi = state.selectedChar===ch.id || !state.selectedChar;
     const full=route.waypoints.map(([lid])=>{const L=loc(lid);return L?[L.x,L.y]:null;}).filter(Boolean);
     gRoutes.appendChild(E("polyline",{points:full.map(p=>p.join(",")).join(" "),fill:"none",stroke:ch.color,"stroke-width":1.2,"stroke-dasharray":"2 6",opacity:hi?.35:.12}));
@@ -962,6 +968,14 @@ function updateMinimapViewport(){
   mm.addEventListener("pointerdown",e=>{ mmDrag=true; mm.setPointerCapture(e.pointerId); jump(e); });
   mm.addEventListener("pointermove",e=>{ if(mmDrag) jump(e); });
   mm.addEventListener("pointerup",()=>{ mmDrag=false; });
+  // Keyboard operability: pan with arrows, zoom with +/- when the minimap is focused.
+  mm.addEventListener("keydown",e=>{
+    const step=.08/state.cam.z;
+    const pan={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[e.key];
+    if(pan){ e.preventDefault(); flyTo(clamp(state.cam.x+pan[0],0,1),clamp(state.cam.y+pan[1],0,1),state.cam.z); }
+    else if(e.key==="+"||e.key==="="){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clamp(state.cam.z*1.4,1,4)); }
+    else if(e.key==="-"){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clamp(state.cam.z/1.4,1,4)); }
+  });
 })();
 function flyTo(nx,ny,nz,cb){
   const from={...state.cam}, to={x:nx,y:ny,z:nz};
