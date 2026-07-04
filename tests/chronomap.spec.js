@@ -291,4 +291,17 @@ test.describe("overview minimap", () => {
     const after = await page.locator("#cam").getAttribute("transform");
     expect(after).not.toEqual(before);
   });
+
+  test("is keyboard-operable: focus + arrow key pans the camera", async ({ page }) => {
+    await open(page, "?u=lotr&cam=0.4,0.4,2");
+    const mm = page.locator("#minimap");
+    await expect(mm).toHaveAttribute("role", "button");
+    await expect(mm).toHaveAttribute("aria-label", /overview/i);
+    const before = await page.locator("#cam").getAttribute("transform");
+    await mm.focus();
+    await mm.press("ArrowRight");
+    await page.waitForTimeout(500);
+    const after = await page.locator("#cam").getAttribute("transform");
+    expect(after).not.toEqual(before);
+  });
 });
