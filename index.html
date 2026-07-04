@@ -173,6 +173,30 @@
 
   .loc-label { font-family:var(--font-serif); font-size:12px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
   .evt-label { font-family:var(--font-ui); font-size:11px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
+  .region-label { font-family:var(--font-serif); font-size:20px; fill:var(--u-secondary); opacity:.28; letter-spacing:3px; text-transform:uppercase; pointer-events:none; }
+
+  /* Atmospheric depth: a soft vignette over the whole stage (Rich tier only). */
+  .vignette { position:absolute; inset:0; pointer-events:none; z-index:5;
+    background:radial-gradient(120% 90% at 50% 42%, transparent 55%, rgba(0,0,0,.28) 100%);
+    opacity:1; transition:opacity .5s; }
+  .low-power .vignette, .reduced .vignette { opacity:0; }
+
+  /* Contextual arrival card — richer than the repeated place name. */
+  .arrival-card { position:absolute; z-index:22; min-width:170px; max-width:230px;
+    background:color-mix(in srgb, var(--u-panel) 94%, transparent); color:var(--u-text);
+    border:1px solid var(--u-primary); border-left:4px solid var(--u-primary); border-radius:10px;
+    padding:9px 11px; box-shadow:var(--shadow); pointer-events:none;
+    transform:translate(-50%,-118%) translateY(8px); opacity:0; transition:opacity .28s, transform .28s; }
+  .arrival-card.show { opacity:1; transform:translate(-50%,-118%) translateY(0); }
+  .reduced .arrival-card { transition:opacity .2s; }
+  .arrival-card .ac-kind { display:flex; align-items:center; gap:6px; font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--u-secondary); margin-bottom:3px; }
+  .arrival-card .ac-glyph { font-size:14px; line-height:1; }
+  .arrival-card h4 { margin:0 0 3px; font-family:var(--font-serif); font-size:14px; line-height:1.15; }
+  .arrival-card p { margin:0; font-size:11px; line-height:1.4; opacity:.85; }
+  .arrival-card .ac-who { margin-top:5px; font-size:10px; opacity:.7; }
+
+  /* SVG arrival pulse (SMIL-driven; the whole layer is hidden in low-power). */
+  .low-power #fx { display:none; }
 
   .toast { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); background:var(--u-header-bg); color:var(--u-primary); font-size:12px; padding:8px 14px; border-radius:999px; box-shadow:var(--shadow); z-index:50; opacity:0; transition:opacity .3s; pointer-events:none; }
   .toast.show { opacity:1; }
@@ -216,15 +240,23 @@
         </radialGradient>
         <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="6"/></filter>
         <linearGradient id="dangerG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" style="stop-color:var(--u-danger)"/><stop offset="100%" style="stop-color:#111"/></linearGradient>
+        <!-- Faux-3D depth: soft cast shadow for elevated landmarks + a marker glow. -->
+        <filter id="elev" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/></filter>
+        <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <radialGradient id="pin" cx="38%" cy="32%" r="75%"><stop offset="0%" stop-color="#fff" stop-opacity=".9"/><stop offset="55%" stop-color="var(--u-map-1)"/><stop offset="100%" stop-color="var(--u-map-2)"/></radialGradient>
+        <radialGradient id="atmo" cx="50%" cy="120%" r="90%"><stop offset="0%" stop-color="var(--u-primary)" stop-opacity=".16"/><stop offset="60%" stop-color="var(--u-primary)" stop-opacity="0"/></radialGradient>
       </defs>
       <g id="cam">
         <rect x="-200" y="-200" width="1400" height="1100" fill="url(#mapbg)"/>
         <g id="terrain"></g>
+        <rect id="atmoOverlay" x="-200" y="-200" width="1400" height="1100" fill="url(#atmo)" pointer-events="none"/>
         <g id="routes"></g>
         <g id="locations"></g>
         <g id="events"></g>
+        <g id="fx" pointer-events="none"></g>
       </g>
     </svg>
+    <div class="vignette" id="vignette" aria-hidden="true"></div>
 
     <div class="controls" role="group" aria-label="Layers and filters">
       <div class="group" id="layerGroup" hidden>
@@ -264,6 +296,7 @@
       <div class="body" id="dBody"></div>
     </aside>
 
+    <div class="arrival-card" id="arrivalCard" aria-hidden="true"></div>
     <div class="toast" id="toast"></div>
   </div>
 
@@ -328,41 +361,95 @@ function applyTheme(id){
 const NS="http://www.w3.org/2000/svg";
 function E(tag,attrs){ const e=document.createElementNS(NS,tag); for(const k in attrs) e.setAttribute(k,attrs[k]); return e; }
 function rng(seed){ let s=seed; return ()=> (s=(s*9301+49297)%233280)/233280; }
+const FXMOTION = () => !reduced && !lowPower();   // gate ambient/parallax motion
+
+/* ---- terrain building blocks (shared across worlds) ---- */
+function ridge(layer,x1,x2,base,h,teeth,seed,o={}){
+  const r=rng(seed); let d=`M${x1},${base}`;
+  const step=(x2-x1)/teeth;
+  for(let i=0;i<teeth;i++){ const px=x1+step*(i+.5), py=base-h*(.55+r()*.7), nx=x1+step*(i+1); d+=` L${px.toFixed(1)},${py.toFixed(1)} L${nx.toFixed(1)},${base}`; }
+  d+=" Z";
+  layer.appendChild(E("path",{d, fill:o.fill||"var(--u-land-stroke)", opacity:o.opacity??.5, filter:"url(#elev)"}));
+  layer.appendChild(E("path",{d, fill:"none", stroke:o.cap||"var(--u-label-halo)", "stroke-width":.8, opacity:.28})); // light ridge line
+}
+function forest(layer,cx,cy,rad,n,seed,col){
+  const r=rng(seed);
+  for(let i=0;i<n;i++){ const a=r()*6.28,dd=Math.sqrt(r())*rad, x=cx+Math.cos(a)*dd, y=cy+Math.sin(a)*dd, s=1.6+r()*1.4;
+    layer.appendChild(E("path",{d:`M${x.toFixed(1)},${(y+s).toFixed(1)} L${(x-s).toFixed(1)},${(y+s).toFixed(1)} L${x.toFixed(1)},${(y-s*1.6).toFixed(1)} L${(x+s).toFixed(1)},${(y+s).toFixed(1)} Z`, fill:col||"var(--u-forest)", opacity:.42+r()*.2})); }
+}
+function road(layer,pts,o={}){ layer.appendChild(E("path",{d:"M"+pts.map(p=>p.join(",")).join(" L "), fill:"none", stroke:o.stroke||"var(--u-secondary)", "stroke-width":o.w||1.4, "stroke-dasharray":o.dash||"5 6", opacity:o.opacity??.35, "stroke-linecap":"round", "stroke-linejoin":"round"})); }
+function region(layer,x,y,txt){ const t=E("text",{x,y,class:"region-label","text-anchor":"middle"}); t.textContent=txt; layer.appendChild(t); }
 
 const TERRAIN = {
-  lotr(g){
-    g.appendChild(E("path",{d:"M70,120 C 200,60 380,80 520,110 C 700,140 860,180 900,300 C 940,420 880,560 720,600 C 520,650 300,640 180,560 C 60,480 40,300 70,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
-    g.appendChild(E("path",{d:"M470,150 C 520,240 540,330 560,400 C 580,470 590,520 600,560", fill:"none", stroke:"var(--u-water)", "stroke-width":4, opacity:.55}));
-    const r=rng(7);
-    [[490,285,26],[660,415,22],[300,300,18]].forEach(([cx,cy,rad])=>{ for(let i=0;i<40;i++){ const a=r()*6.28,d=Math.sqrt(r())*rad; g.appendChild(E("circle",{cx:cx+Math.cos(a)*d, cy:cy+Math.sin(a)*d, r:1.6, fill:"var(--u-forest)", opacity:.5})); } });
-    [[430,240,460,300,7],[720,340,800,420,8],[560,430,720,430,10]].forEach(([x1,y1,x2,y2,n])=>{ for(let i=0;i<n;i++){ const f=i/(n-1),x=x1+(x2-x1)*f,y=y1+(y2-y1)*f; g.appendChild(E("path",{d:`M${x-8},${y+6} L${x},${y-8} L${x+8},${y+6}`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1.6, opacity:.7})); } });
-    g.appendChild(E("path",{d:"M690,330 C 780,320 860,360 870,430 C 875,490 820,520 740,505 C 690,495 670,430 690,330 Z", fill:"url(#dangerG)", opacity:.35}));
+  lotr({far,mid,near}){
+    // far — hazy distant ranges + drop-shadowed coastline
+    far.appendChild(E("path",{d:"M76,128 C 206,66 384,86 524,116 C 704,146 866,186 906,306 C 946,426 886,566 724,606 C 524,656 302,646 182,566 C 62,486 44,306 76,128 Z", fill:"#000", opacity:.16, transform:"translate(5,8)"}));
+    ridge(far,120,360,150,26,7,21,{opacity:.22});
+    // mid — main landmass, rivers, mountains, forests, roads, regions
+    mid.appendChild(E("path",{d:"M70,120 C 200,60 380,80 520,110 C 700,140 860,180 900,300 C 940,420 880,560 720,600 C 520,650 300,640 180,560 C 60,480 40,300 70,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
+    // Anduin + tributaries
+    mid.appendChild(E("path",{d:"M470,150 C 520,240 540,330 560,400 C 580,470 585,520 600,565", fill:"none", stroke:"var(--u-water)", "stroke-width":4.5, opacity:.55, "stroke-linecap":"round"}));
+    mid.appendChild(E("path",{d:"M470,150 C 430,210 405,250 400,300", fill:"none", stroke:"var(--u-water)", "stroke-width":2, opacity:.4}));
+    mid.appendChild(E("path",{d:"M560,400 C 620,410 660,430 700,470", fill:"none", stroke:"var(--u-water)", "stroke-width":2, opacity:.4}));
+    // Misty Mountains (N–S spine) + White Mountains (E–W, Gondor/Rohan)
+    ridge(mid,430,470,340,40,9,7,{fill:"var(--u-land-stroke)",opacity:.6});
+    ridge(mid,470,660,470,30,11,8,{fill:"var(--u-land-stroke)",opacity:.55});
+    // Mordor plateau — jagged, menacing
+    mid.appendChild(E("path",{d:"M690,325 C 790,312 872,352 878,432 C 883,498 822,528 740,510 C 686,498 664,432 690,325 Z", fill:"url(#dangerG)", opacity:.4, stroke:"var(--u-danger)", "stroke-width":1, "stroke-dasharray":"3 4"}));
+    forest(mid,505,285,30,44,71,"var(--u-forest)");   // Lothlórien
+    forest(mid,430,352,24,30,72);                       // Fangorn
+    forest(mid,300,300,20,26,73);                       // Old Forest / Eriador wood
+    road(mid,[[120,210],[225,220],[305,190],[390,165]],{}); // the road east to Rivendell
+    road(mid,[[390,165],[455,250],[505,280]],{});
+    region(mid,220,150,"Eriador"); region(mid,470,540,"Rohan"); region(mid,610,590,"Gondor"); region(mid,790,470,"Mordor");
+    // near — foreground hachures/trees
+    near.appendChild(E("path",{d:"M690,330 C 780,320 860,360 870,430 C 875,490 820,520 740,505", fill:"none", stroke:"var(--u-danger)", "stroke-width":.8, opacity:.3}));
+    forest(near,540,470,14,10,74);
   },
-  hp(g){
-    // Stylized Britain — narrow north (Scotland), wider south (England).
-    g.appendChild(E("path",{d:"M430,120 C 470,110 500,140 505,190 C 510,240 480,270 500,320 C 520,360 560,370 560,420 C 560,470 540,520 500,560 C 450,600 380,600 360,540 C 345,500 380,470 375,430 C 370,390 340,380 350,330 C 360,290 400,290 405,250 C 410,210 400,150 430,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
-    g.appendChild(E("path",{d:"M470,300 C 500,360 520,420 540,520", fill:"none", stroke:"var(--u-water)", "stroke-width":3, opacity:.5}));
-    const r=rng(3); // Forbidden Forest near Hogwarts (470,180)
-    for(let i=0;i<34;i++){ const a=r()*6.28,d=Math.sqrt(r())*30; g.appendChild(E("circle",{cx:462+Math.cos(a)*d, cy:210+Math.sin(a)*d, r:1.7, fill:"var(--u-forest)", opacity:.5})); }
-    // subtle contour hachures on the highlands
-    for(let i=0;i<6;i++){ const y=150+i*10; g.appendChild(E("path",{d:`M${430+i*4},${y} q 20,-6 40,0`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.4})); }
+  hp({far,mid,near}){
+    // far — sea haze + shadow coastline
+    far.appendChild(E("path",{d:"M436,124 C 476,114 504,144 509,194 C 514,244 484,274 504,324 C 524,364 564,374 564,424 C 564,474 544,524 504,564 C 454,604 384,604 364,544 C 349,504 384,474 379,434 C 374,394 344,384 354,334 C 364,294 404,294 409,254 C 414,214 404,154 436,124 Z", fill:"#000", opacity:.14, transform:"translate(4,7)"}));
+    const rs=rng(19); for(let i=0;i<26;i++){ const x=rs()*1000, y=rs()*700; far.appendChild(E("path",{d:`M${x},${y} q 8,-4 16,0`, fill:"none", stroke:"var(--u-water)", "stroke-width":.8, opacity:.12})); } // sea shimmer
+    // mid — Britain, Thames, Highlands, Forbidden Forest, Hogwarts Express line
+    mid.appendChild(E("path",{d:"M430,120 C 470,110 500,140 505,190 C 510,240 480,270 500,320 C 520,360 560,370 560,420 C 560,470 540,520 500,560 C 450,600 380,600 360,540 C 345,500 380,470 375,430 C 370,390 340,380 350,330 C 360,290 400,290 405,250 C 410,210 400,150 430,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
+    mid.appendChild(E("path",{d:"M470,300 C 500,360 520,420 545,525", fill:"none", stroke:"var(--u-water)", "stroke-width":3, opacity:.5, "stroke-linecap":"round"})); // river
+    mid.appendChild(E("path",{d:"M508,540 C 528,536 548,540 560,548", fill:"none", stroke:"var(--u-water)", "stroke-width":2.4, opacity:.45})); // Thames estuary
+    ridge(mid,405,505,205,26,9,31,{opacity:.5});  // Scottish Highlands
+    forest(mid,462,232,26,40,33,"var(--u-forest)"); // Forbidden Forest
+    road(mid,[[540,520],[520,470],[500,400],[485,320],[478,255],[470,205]],{stroke:"var(--u-line)",w:1.6,dash:"2 7",opacity:.5}); // Hogwarts Express
+    region(mid,455,150,"Highlands"); region(mid,556,560,"London"); region(mid,392,590,"West Country");
+    near.appendChild(E("path",{d:"M410,150 q 24,-8 48,0 M414,170 q 24,-8 48,0", fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.35}));
+    forest(near,430,500,12,8,34);
   },
-  matrix(g, layer){
+  matrix({far,mid,near}, layer){
     if(layer==="sim"){
-      // green code grid + glowing nodes
-      for(let x=0;x<=1000;x+=50) g.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.12}));
-      for(let y=0;y<=700;y+=50) g.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.12}));
+      for(let x=0;x<=1000;x+=50) far.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.08}));
+      for(let y=0;y<=700;y+=50) far.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.08}));
+      // mid — brighter grid, city blocks (skyline), glowing nodes
+      for(let x=0;x<=1000;x+=100) mid.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-primary)", "stroke-width":.5, opacity:.14}));
+      for(let y=0;y<=700;y+=100) mid.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-primary)", "stroke-width":.5, opacity:.14}));
       const r=rng(11);
-      for(let i=0;i<70;i++){ g.appendChild(E("circle",{cx:r()*1000, cy:r()*700, r:r()*1.6+.4, fill:"var(--u-primary)", opacity:r()*.5+.1})); }
-      // a few vertical "rain" streaks
-      for(let i=0;i<10;i++){ const x=r()*1000, y=r()*500; g.appendChild(E("line",{x1:x,y1:y,x2:x,y2:y+90, stroke:"var(--u-primary)", "stroke-width":1, opacity:.15})); }
+      for(let i=0;i<18;i++){ const bx=r()*940+10, bw=18+r()*34, bh=40+r()*120; mid.appendChild(E("rect",{x:bx.toFixed(1),y:(560-bh).toFixed(1),width:bw.toFixed(1),height:bh.toFixed(1), fill:"none", stroke:"var(--u-primary)", "stroke-width":.7, opacity:.16})); }
+      for(let i=0;i<70;i++){ mid.appendChild(E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:(r()*1.6+.4).toFixed(2), fill:"var(--u-primary)", opacity:r()*.5+.1, filter:"url(#glow)"})); }
+      // near — falling code rain (animated on capable tier)
+      for(let i=0;i<14;i++){ const x=r()*1000, y=r()*400; const ln=E("line",{x1:x.toFixed(1),y1:y.toFixed(1),x2:x.toFixed(1),y2:(y+90).toFixed(1), stroke:"var(--u-primary)", "stroke-width":1, opacity:.16});
+        if(FXMOTION()){ const dur=(2.4+r()*3).toFixed(2)+"s"; ln.appendChild(E("animateTransform",{attributeName:"transform",type:"translate",from:"0 -160",to:"0 760",dur,repeatCount:"indefinite",begin:(-r()*4).toFixed(2)+"s"})); }
+        near.appendChild(ln); }
     } else {
-      // real world — dark, tunnels converging on Machine City (820,300)
       const r=rng(5);
-      for(let i=0;i<7;i++){ const sx=r()*300+80, sy=r()*500+120; g.appendChild(E("path",{d:`M${sx},${sy} Q ${(sx+820)/2},${(sy+300)/2+ (r()*120-60)} 820,300`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.25})); }
-      g.appendChild(E("circle",{cx:820,cy:300,r:60, fill:"none", stroke:"var(--u-danger)", "stroke-width":1, opacity:.3}));
-      g.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.35}));
-      for(let i=0;i<40;i++){ g.appendChild(E("circle",{cx:r()*1000, cy:r()*700, r:.6, fill:"var(--u-water)", opacity:.25})); }
+      // far — cavern strata haze
+      for(let i=0;i<6;i++){ const y=90+i*100; far.appendChild(E("path",{d:`M0,${y} Q 500,${y-30} 1000,${y}`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.12})); }
+      // mid — tunnels converge on Machine City; Zion cavern
+      for(let i=0;i<9;i++){ const sx=r()*320+70, sy=r()*520+110; mid.appendChild(E("path",{d:`M${sx.toFixed(0)},${sy.toFixed(0)} Q ${((sx+820)/2).toFixed(0)},${((sy+300)/2+(r()*140-70)).toFixed(0)} 820,300`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.28})); }
+      mid.appendChild(E("circle",{cx:300,cy:560,r:70, fill:"none", stroke:"var(--u-forest)", "stroke-width":1, opacity:.3})); // Zion cavern
+      mid.appendChild(E("circle",{cx:300,cy:560,r:44, fill:"var(--u-forest)", opacity:.06}));
+      mid.appendChild(E("circle",{cx:820,cy:300,r:64, fill:"none", stroke:"var(--u-danger)", "stroke-width":1, opacity:.32, filter:"url(#glow)"}));
+      mid.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.4}));
+      region(mid,300,470,"Zion"); region(mid,820,210,"01");
+      // near — sentinel specks / dust
+      for(let i=0;i<50;i++){ const c=E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:.7, fill:"var(--u-danger)", opacity:.2+r()*.2});
+        if(FXMOTION() && r()>.7){ c.appendChild(E("animate",{attributeName:"opacity",values:"0.1;0.5;0.1",dur:(1.5+r()*2).toFixed(2)+"s",repeatCount:"indefinite"})); }
+        near.appendChild(c); }
     }
   },
 };
@@ -409,24 +496,30 @@ const UNIVERSES = {
     characters:[
       {id:"frodo",name:"Frodo Baggins",color:"#2f6b8f",role:"Ring-bearer",blurb:"A hobbit of the Shire who bears the One Ring to the Fire."},
       {id:"aragorn",name:"Aragorn",color:"#c89a4a",role:"Heir of Isildur",blurb:"Strider — Ranger, captain, and the returning King of Gondor."},
+      {id:"gandalf",name:"Gandalf",color:"#8a8fa6",role:"The Grey, then the White",blurb:"A wizard who falls with the Balrog at Khazad-dûm and returns to lead the Free Peoples to victory."},
+      {id:"sam",name:"Samwise Gamgee",color:"#6b8e3d",role:"Frodo's companion",blurb:"The gardener who never leaves his master's side — and carries them both when it matters most."},
     ],
     routes:[
       {id:"r_frodo",characterId:"frodo",layer:"me",waypoints:[["bagend",0],["bree",.03],["weathertop",.05],["rivendell",.10],["moria",.30],["lorien",.33],["amonhen",.45],["emynmuil",.47],["ithilien",.58],["cirith",.62],["mountdoom",.82]]},
       {id:"r_aragorn",characterId:"aragorn",layer:"me",waypoints:[["rivendell",.10],["moria",.30],["lorien",.33],["amonhen",.45],["edoras",.50],["helm",.52],["isengard",.53],["dunharrow",.57],["pelargir",.63],["minastirith",.66],["blackgate",.80]]},
+      {id:"r_gandalf",characterId:"gandalf",layer:"me",waypoints:[["rivendell",.10],["moria",.30],["edoras",.48],["helm",.52],["isengard",.53],["minastirith",.66],["blackgate",.80]]},
+      {id:"r_sam",characterId:"sam",layer:"me",waypoints:[["bagend",0],["bree",.03],["weathertop",.05],["rivendell",.10],["moria",.30],["lorien",.33],["amonhen",.45],["emynmuil",.47],["ithilien",.58],["cirith",.70],["mountdoom",.82]]},
     ],
     events:[
-      {id:"e_leave",title:"Frodo leaves Bag End",t:0,loc:"bagend",era:"flight",kind:"journey",importance:5,chars:["frodo"],factions:["free"],source:"canon",date:"23 September, T.A. 3018",summary:"Frodo, Sam, Merry and Pippin slip out of the Shire, carrying the Ring toward Rivendell."},
+      {id:"e_leave",title:"Frodo leaves Bag End",t:0,loc:"bagend",era:"flight",kind:"journey",importance:5,chars:["frodo","sam"],factions:["free"],source:"canon",date:"23 September, T.A. 3018",summary:"Frodo, Sam, Merry and Pippin slip out of the Shire, carrying the Ring toward Rivendell."},
       {id:"e_weather",title:"Ambush at Weathertop",t:.05,loc:"weathertop",era:"flight",kind:"loss",importance:4,chars:["frodo"],factions:["mordor"],source:"canon",date:"6 October, T.A. 3018",summary:"The Witch-king wounds Frodo with a Morgul blade; only Rivendell's healing saves him."},
       {id:"e_council",title:"The Council of Elrond",t:.10,loc:"rivendell",era:"flight",kind:"meeting",importance:5,chars:["frodo","aragorn"],factions:["free"],source:"canon",date:"25 October, T.A. 3018",summary:"The Free Peoples resolve the Ring must be destroyed. Frodo volunteers; the Fellowship is formed."},
-      {id:"e_moria",title:"The Bridge of Khazad-dûm",t:.30,loc:"moria",era:"fellowship",kind:"loss",importance:5,chars:["frodo","aragorn"],factions:["free"],source:"canon",date:"15 January, T.A. 3019",summary:"Gandalf faces the Balrog — “You shall not pass” — and falls into shadow."},
-      {id:"e_break",title:"The Breaking of the Fellowship",t:.45,loc:"amonhen",era:"fellowship",kind:"turning-point",importance:5,chars:["frodo","aragorn"],factions:["free","isengard"],source:"canon",date:"26 February, T.A. 3019",summary:"Boromir falls defending the hobbits. Frodo and Sam turn east alone; the paths diverge."},
-      {id:"e_helm",title:"The Battle of Helm's Deep",t:.52,loc:"helm",era:"twotowers",kind:"battle",importance:5,chars:["aragorn"],factions:["free","isengard"],source:"canon",date:"3–4 March, T.A. 3019",summary:"Rohan holds the Hornburg through the night until dawn and Gandalf break the siege."},
+      {id:"e_moria",title:"The Bridge of Khazad-dûm",t:.30,loc:"moria",era:"fellowship",kind:"loss",importance:5,chars:["frodo","aragorn","gandalf"],factions:["free"],source:"canon",date:"15 January, T.A. 3019",summary:"Gandalf faces the Balrog — “You shall not pass” — and falls into shadow."},
+      {id:"e_break",title:"The Breaking of the Fellowship",t:.45,loc:"amonhen",era:"fellowship",kind:"turning-point",importance:5,chars:["frodo","aragorn","sam"],factions:["free","isengard"],source:"canon",date:"26 February, T.A. 3019",summary:"Boromir falls defending the hobbits. Frodo and Sam turn east alone; the paths diverge."},
+      {id:"e_white",title:"The White Rider",t:.48,loc:"edoras",era:"twotowers",kind:"revelation",importance:4,chars:["gandalf","aragorn"],factions:["free"],source:"canon",date:"February–March, T.A. 3019",summary:"Gandalf returns transfigured — the White Rider — casts out Saruman's grip on Théoden, and rouses Rohan to war."},
+      {id:"e_helm",title:"The Battle of Helm's Deep",t:.52,loc:"helm",era:"twotowers",kind:"battle",importance:5,chars:["aragorn","gandalf"],factions:["free","isengard"],source:"canon",date:"3–4 March, T.A. 3019",summary:"Rohan holds the Hornburg through the night until dawn and Gandalf break the siege."},
       {id:"e_isengard",title:"The Ents take Isengard",t:.53,loc:"isengard",era:"twotowers",kind:"turning-point",importance:4,chars:[],factions:["free","isengard"],source:"canon",date:"3 March, T.A. 3019",summary:"Roused by Merry and Pippin, the Ents flood Isengard and pen Saruman in his tower."},
-      {id:"e_shelob",title:"Shelob's Lair",t:.62,loc:"cirith",era:"twotowers",kind:"loss",importance:4,chars:["frodo"],factions:["mordor"],source:"interpretation",date:"13 March, T.A. 3019",summary:"Gollum leads Frodo into the spider's tunnels. Note: the films move this scene to the third installment — a sequencing change from the book, flagged as interpretation."},
+      {id:"e_shelob",title:"Shelob's Lair",t:.62,loc:"cirith",era:"twotowers",kind:"loss",importance:4,chars:["frodo","sam"],factions:["mordor"],source:"interpretation",date:"13 March, T.A. 3019",summary:"Gollum leads Frodo into the spider's tunnels. Note: the films move this scene to the third installment — a sequencing change from the book, flagged as interpretation."},
+      {id:"e_samtower",title:"The Tower of Cirith Ungol",t:.70,loc:"cirith",era:"return",kind:"turning-point",importance:4,chars:["sam"],factions:["mordor"],source:"canon",date:"14–15 March, T.A. 3019",summary:"Believing Frodo dead, Sam takes up the Ring — then storms the orc-tower to rescue his master and carry him on toward the fire."},
       {id:"e_paths",title:"The Paths of the Dead",t:.58,loc:"dunharrow",era:"return",kind:"journey",importance:4,chars:["aragorn"],factions:["free"],source:"canon",date:"8 March, T.A. 3019",summary:"Aragorn claims the Oathbreakers, then rides to the sea to seize the Corsair fleet."},
-      {id:"e_pelennor",title:"The Battle of the Pelennor Fields",t:.66,loc:"minastirith",era:"return",kind:"battle",importance:5,chars:["aragorn"],factions:["free","mordor"],source:"canon",date:"15 March, T.A. 3019",summary:"Rohan charges to Gondor's aid; Éowyn and Merry fell the Witch-king; Aragorn arrives under friendly sails."},
-      {id:"e_gate",title:"The Black Gate Opens",t:.80,loc:"blackgate",era:"return",kind:"battle",importance:5,chars:["aragorn"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"The Host of the West offers itself as bait to draw the Eye from a hobbit near the mountain."},
-      {id:"e_doom",title:"The Ring is Unmade",t:.82,loc:"mountdoom",era:"return",kind:"turning-point",importance:5,chars:["frodo"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"At the Cracks of Doom the Ring claims Frodo — but Gollum's last hunger destroys them both, and Sauron falls."},
+      {id:"e_pelennor",title:"The Battle of the Pelennor Fields",t:.66,loc:"minastirith",era:"return",kind:"battle",importance:5,chars:["aragorn","gandalf"],factions:["free","mordor"],source:"canon",date:"15 March, T.A. 3019",summary:"Rohan charges to Gondor's aid; Éowyn and Merry fell the Witch-king; Aragorn arrives under friendly sails."},
+      {id:"e_gate",title:"The Black Gate Opens",t:.80,loc:"blackgate",era:"return",kind:"battle",importance:5,chars:["aragorn","gandalf"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"The Host of the West offers itself as bait to draw the Eye from a hobbit near the mountain."},
+      {id:"e_doom",title:"The Ring is Unmade",t:.82,loc:"mountdoom",era:"return",kind:"turning-point",importance:5,chars:["frodo","sam"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"At the Cracks of Doom the Ring claims Frodo — but Gollum's last hunger destroys them both, and Sauron falls."},
     ],
   },
 
@@ -462,24 +555,30 @@ const UNIVERSES = {
     characters:[
       {id:"harry",name:"Harry Potter",color:"#8b2635",role:"The Boy Who Lived",blurb:"The orphan marked by a curse he survived, who must end the wizard who cast it."},
       {id:"voldemort",name:"Lord Voldemort",color:"#6b4a7a",role:"The Dark Lord",blurb:"He split his soul to cheat death; each fragment must be found and destroyed."},
+      {id:"hermione",name:"Hermione Granger",color:"#c9922e",role:"The brightest witch of her age",blurb:"Muggle-born, relentlessly prepared, and the reason the other two survive the hunt."},
+      {id:"snape",name:"Severus Snape",color:"#2f5233",role:"The Half-Blood Prince",blurb:"A double agent playing the longest game — his true allegiance hidden until his last breath."},
     ],
     routes:[
       {id:"r_harry",characterId:"harry",layer:"gb",waypoints:[["privet",0],["kingscross",.05],["hogwarts",.12],["hogwarts",.50],["hangleton",.55],["ministry",.66],["hogwarts",.79],["godrics",.86],["forestdean",.88],["malfoy",.90],["diagon",.93],["hogwarts",.98]]},
       {id:"r_voldemort",characterId:"voldemort",layer:"gb",waypoints:[["hangleton",.55],["ministry",.66],["malfoy",.86],["hogwarts",.98]]},
+      {id:"r_hermione",characterId:"hermione",layer:"gb",waypoints:[["kingscross",.05],["hogwarts",.12],["hogwarts",.50],["ministry",.66],["hogwarts",.79],["forestdean",.88],["malfoy",.90],["diagon",.93],["hogwarts",.98]]},
+      {id:"r_snape",characterId:"snape",layer:"gb",waypoints:[["hogwarts",.12],["hangleton",.55],["hogwarts",.79],["malfoy",.90],["hogwarts",.98]]},
     ],
     events:[
       {id:"e_letter",title:"The Letter Arrives",t:.02,loc:"privet",era:"stone",kind:"revelation",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"Summer 1991",summary:"Hagrid finds Harry: “Yer a wizard.” The door to a hidden world swings open."},
-      {id:"e_platform",title:"Platform Nine and Three-Quarters",t:.05,loc:"kingscross",era:"stone",kind:"journey",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"1 September 1991",summary:"Harry runs at a solid barrier and boards the Hogwarts Express — and meets Ron and Hermione."},
-      {id:"e_stone",title:"The Philosopher's Stone",t:.12,loc:"hogwarts",era:"stone",kind:"turning-point",importance:4,chars:["harry","voldemort"],factions:["order","death"],source:"canon",date:"June 1992",summary:"Beneath the trapdoor, Harry faces the shade of Voldemort clinging to a servant's face."},
-      {id:"e_chamber",title:"The Chamber of Secrets",t:.26,loc:"hogwarts",era:"chamber",kind:"battle",importance:4,chars:["harry"],factions:["death"],source:"canon",date:"1993",summary:"Harry destroys the diary — a Horcrux, though no one yet knows the word — and the basilisk within."},
+      {id:"e_platform",title:"Platform Nine and Three-Quarters",t:.05,loc:"kingscross",era:"stone",kind:"journey",importance:4,chars:["harry","hermione"],factions:["order"],source:"canon",date:"1 September 1991",summary:"Harry runs at a solid barrier and boards the Hogwarts Express — and meets Ron and Hermione."},
+      {id:"e_stone",title:"The Philosopher's Stone",t:.12,loc:"hogwarts",era:"stone",kind:"turning-point",importance:4,chars:["harry","voldemort","hermione"],factions:["order","death"],source:"canon",date:"June 1992",summary:"Beneath the trapdoor, Harry faces the shade of Voldemort clinging to a servant's face."},
+      {id:"e_chamber",title:"The Chamber of Secrets",t:.26,loc:"hogwarts",era:"chamber",kind:"battle",importance:4,chars:["harry","hermione"],factions:["death"],source:"canon",date:"1993",summary:"Harry destroys the diary — a Horcrux, though no one yet knows the word — and the basilisk within."},
       {id:"e_sirius",title:"The Truth About Sirius Black",t:.40,loc:"hogwarts",era:"prisoner",kind:"revelation",importance:3,chars:["harry"],factions:["order"],source:"canon",date:"1994",summary:"The supposed betrayer is innocent; the real traitor has hidden as a rat for twelve years."},
       {id:"e_tournament",title:"The Triwizard Tournament",t:.50,loc:"hogwarts",era:"goblet",kind:"turning-point",importance:3,chars:["harry"],factions:["order"],source:"canon",date:"1994–95",summary:"Harry is entered against the rules; the final task is a trap with a portkey at its heart."},
-      {id:"e_rebirth",title:"The Return of Voldemort",t:.55,loc:"hangleton",era:"goblet",kind:"turning-point",importance:5,chars:["harry","voldemort"],factions:["death"],source:"canon",date:"24 June 1995",summary:"In the Riddle graveyard the Dark Lord rises again in flesh — and the war is real."},
+      {id:"e_rebirth",title:"The Return of Voldemort",t:.55,loc:"hangleton",era:"goblet",kind:"turning-point",importance:5,chars:["harry","voldemort","snape"],factions:["death"],source:"canon",date:"24 June 1995",summary:"In the Riddle graveyard the Dark Lord rises again in flesh — the Dark Mark burns, and the war is real."},
       {id:"e_ministry",title:"Battle of the Department of Mysteries",t:.66,loc:"ministry",era:"phoenix",kind:"battle",importance:4,chars:["harry","voldemort"],factions:["order","death","ministry"],source:"canon",date:"June 1996",summary:"The prophecy shatters; Sirius falls through the veil; the Ministry can deny the truth no longer."},
-      {id:"e_tower",title:"The Astronomy Tower",t:.79,loc:"hogwarts",era:"prince",kind:"loss",importance:5,chars:["harry"],factions:["order","death"],source:"canon",date:"June 1997",summary:"Dumbledore falls; Harry is left with a locket, a mission, and the meaning of Horcruxes."},
-      {id:"e_hunt",title:"The Horcrux Hunt",t:.88,loc:"forestdean",era:"hallows",kind:"journey",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"Winter 1997",summary:"On the run across Britain, the three chase the fragments of a soul — a silver doe leads Harry to a sword in the ice."},
-      {id:"e_gringotts",title:"Break-in at Gringotts",t:.93,loc:"diagon",era:"hallows",kind:"turning-point",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"1998",summary:"A Horcrux is wrenched from a vault, and a dragon carries the thieves to freedom over London."},
-      {id:"e_battle",title:"The Battle of Hogwarts",t:.98,loc:"hogwarts",era:"hallows",kind:"battle",importance:5,chars:["harry","voldemort"],factions:["order","death"],source:"canon",date:"2 May 1998",summary:"The school becomes a fortress; the last Horcrux dies, and so, at dawn, does the Dark Lord."},
+      {id:"e_tower",title:"The Astronomy Tower",t:.79,loc:"hogwarts",era:"prince",kind:"loss",importance:5,chars:["harry","snape"],factions:["order","death"],source:"canon",date:"June 1997",summary:"Snape strikes down Dumbledore on the tower; Harry is left with a locket, a mission, and the meaning of Horcruxes."},
+      {id:"e_hunt",title:"The Horcrux Hunt",t:.88,loc:"forestdean",era:"hallows",kind:"journey",importance:4,chars:["harry","hermione"],factions:["order"],source:"canon",date:"Winter 1997",summary:"On the run across Britain, the three chase the fragments of a soul — a silver doe leads Harry to a sword in the ice."},
+      {id:"e_manor",title:"Escape from Malfoy Manor",t:.90,loc:"malfoy",era:"hallows",kind:"loss",importance:4,chars:["harry","hermione"],factions:["order","death"],source:"canon",date:"Spring 1998",summary:"Snatchers drag the trio to the Death Eaters' seat; Hermione is tortured for the truth, and a house-elf's sacrifice buys their escape."},
+      {id:"e_gringotts",title:"Break-in at Gringotts",t:.93,loc:"diagon",era:"hallows",kind:"turning-point",importance:4,chars:["harry","hermione"],factions:["order"],source:"canon",date:"1998",summary:"A Horcrux is wrenched from a vault, and a dragon carries the thieves to freedom over London."},
+      {id:"e_princes",title:"The Prince's Tale",t:.97,loc:"hogwarts",era:"hallows",kind:"revelation",importance:5,chars:["harry","snape"],factions:["order","death"],source:"canon",date:"2 May 1998",summary:"Dying, Snape gives Harry his memories — a lifelong love, a double game, and the final secret Harry needs to end it."},
+      {id:"e_battle",title:"The Battle of Hogwarts",t:.98,loc:"hogwarts",era:"hallows",kind:"battle",importance:5,chars:["harry","voldemort","hermione"],factions:["order","death"],source:"canon",date:"2 May 1998",summary:"The school becomes a fortress; the last Horcrux dies, and so, at dawn, does the Dark Lord."},
       {id:"e_duel",title:"The Final Duel (film staging)",t:.99,loc:"hogwarts",era:"hallows",kind:"turning-point",importance:3,chars:["harry","voldemort"],factions:["order","death"],source:"interpretation",date:"2 May 1998",summary:"The films stage the end as a flying, castle-spanning duel with Voldemort disintegrating into ash — a cinematic invention; in the book he simply falls, mortal at last. Flagged as adaptation."},
     ],
   },
@@ -516,24 +615,32 @@ const UNIVERSES = {
     characters:[
       {id:"neo",name:"Neo",color:"#22c55e",role:"The One",blurb:"A hacker who learns the world is a lie, and chooses to end a war on his own terms."},
       {id:"trinity",name:"Trinity",color:"#67e8f9",role:"Neb crew",blurb:"The one who watches over him — across the simulation and the real."},
+      {id:"morpheus",name:"Morpheus",color:"#e0b341",role:"Captain of the Nebuchadnezzar",blurb:"The believer who offers the choice, frees Neo's mind, and never wavers in the prophecy."},
+      {id:"smith",name:"Agent Smith",color:"#f0466a",role:"Rogue program",blurb:"The system's enforcer turned virus — unbound, self-copying, and bent on unmaking everything, real and simulated."},
     ],
     routes:[
       {id:"r_neo_sim",characterId:"neo",layer:"sim",waypoints:[["metacortex",.02],["hotel",.08],["oracle",.25],["govt",.34],["freeway",.55],["source",.66]]},
       {id:"r_neo_real",characterId:"neo",layer:"real",waypoints:[["pod",.10],["neb",.14],["zion",.50],["logos",.78],["machinecity",.90]]},
       {id:"r_trin_real",characterId:"trinity",layer:"real",waypoints:[["neb",.14],["zion",.50],["logos",.78],["machinecity",.88]]},
+      {id:"r_morph_sim",characterId:"morpheus",layer:"sim",waypoints:[["hotel",.08],["govt",.34]]},
+      {id:"r_morph_real",characterId:"morpheus",layer:"real",waypoints:[["neb",.14],["zion",.50],["dock",.80]]},
+      {id:"r_smith_sim",characterId:"smith",layer:"sim",waypoints:[["metacortex",.02],["govt",.34],["freeway",.55],["oracle",.82]]},
     ],
     events:[
       {id:"e_rabbit",title:"Follow the White Rabbit",t:.03,loc:"hotel",era:"awaken",kind:"revelation",importance:4,chars:["neo","trinity"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"A message on a black screen leads Neo to Trinity, and to a question about the nature of the world."},
-      {id:"e_redpill",title:"The Red Pill",t:.08,loc:"hotel",era:"awaken",kind:"turning-point",importance:5,chars:["neo"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"“You take the red pill, you stay in Wonderland.” Neo chooses to see how deep the rabbit hole goes."},
+      {id:"e_redpill",title:"The Red Pill",t:.08,loc:"hotel",era:"awaken",kind:"turning-point",importance:5,chars:["neo","morpheus"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"“You take the red pill, you stay in Wonderland.” Morpheus offers the choice; Neo chooses to see how deep the rabbit hole goes."},
       {id:"e_wake",title:"Neo Wakes in the Pod",t:.10,loc:"pod",era:"awaken",kind:"turning-point",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Real: ~2199 (disputed)",summary:"Neo opens real eyes for the first time in a vast field of harvested bodies — and is flushed out to be reborn. The real-world year is only Morpheus's guess."},
       {id:"e_oracle",title:"Visiting the Oracle",t:.25,loc:"oracle",era:"awaken",kind:"meeting",importance:4,chars:["neo"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"“Being the One is like being in love.” A prophecy is offered, and quietly undercut."},
-      {id:"e_lobby",title:"Rescuing Morpheus",t:.34,loc:"govt",era:"awaken",kind:"battle",importance:4,chars:["neo","trinity"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"Neo and Trinity storm the lobby to save Morpheus from the Agents — and Neo begins to bend the rules."},
-      {id:"e_zion",title:"Zion",t:.50,loc:"zion",era:"one",kind:"meeting",importance:4,chars:["neo","trinity"],factions:["crew"],source:"canon",date:"Reloaded",summary:"The last human city dances in the dark, then musters to face an approaching army of machines."},
+      {id:"e_lobby",title:"Rescuing Morpheus",t:.34,loc:"govt",era:"awaken",kind:"battle",importance:4,chars:["neo","trinity","morpheus"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"Neo and Trinity storm the lobby to save Morpheus from the Agents — and Neo begins to bend the rules."},
+      {id:"e_smith",title:"Agent Smith Unbound",t:.38,loc:"govt",era:"awaken",kind:"turning-point",importance:4,chars:["neo","smith"],factions:["agents"],source:"canon",date:"Sim: ~1999",summary:"Neo destroys Smith from the inside — but the Agent survives, cut loose from the system and free to copy himself without limit."},
+      {id:"e_zion",title:"Zion",t:.50,loc:"zion",era:"one",kind:"meeting",importance:4,chars:["neo","trinity","morpheus"],factions:["crew"],source:"canon",date:"Reloaded",summary:"The last human city dances in the dark, then musters to face an approaching army of machines."},
       {id:"e_freeway",title:"The Freeway Chase",t:.55,loc:"freeway",era:"one",kind:"journey",importance:3,chars:["trinity"],factions:["crew","exiles"],source:"canon",date:"Reloaded",summary:"A running battle for the Keymaker across fourteen miles of oncoming traffic."},
+      {id:"e_burly",title:"The Burly Brawl",t:.58,loc:"freeway",era:"one",kind:"battle",importance:3,chars:["neo","smith"],factions:["crew","agents"],source:"canon",date:"Reloaded",summary:"A hundred copied Smiths swarm Neo — the rogue program has become a plague spreading through the simulation."},
       {id:"e_source",title:"The Architect",t:.66,loc:"source",era:"one",kind:"revelation",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Reloaded",summary:"The One is not a savior but a system of control — the sixth iteration. Neo refuses the arithmetic and chooses Trinity."},
-      {id:"e_dock",title:"The Battle of Zion",t:.80,loc:"dock",era:"end",kind:"battle",importance:5,chars:[],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"In the dock, APU pilots and a boy named Kid hold the line against a flood of Sentinels."},
-      {id:"e_city",title:"Neo Reaches Machine City",t:.90,loc:"machinecity",era:"end",kind:"turning-point",importance:5,chars:["neo","trinity"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"Blinded but seeing, Neo flies the Logos into 01 to bargain with the Machines against a common enemy: Smith."},
-      {id:"e_truce",title:"The Truce",t:.96,loc:"machinecity",era:"end",kind:"loss",importance:5,chars:["neo"],factions:["crew","agents"],source:"canon",date:"The truce",summary:"Neo lets Smith copy him, then is deleted from within — ending the infection, and the war. Dawn breaks over a freed skyline."},
+      {id:"e_dock",title:"The Battle of Zion",t:.80,loc:"dock",era:"end",kind:"battle",importance:5,chars:["morpheus"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"In the dock, APU pilots and a boy named Kid hold the line against a flood of Sentinels."},
+      {id:"e_smithoracle",title:"Smith Takes the Oracle",t:.82,loc:"oracle",era:"end",kind:"loss",importance:4,chars:["smith"],factions:["agents"],source:"canon",date:"Revolutions",summary:"Smith assimilates the Oracle herself — gaining her sight, and with it the certainty that he has already won."},
+      {id:"e_city",title:"Neo Reaches Machine City",t:.90,loc:"machinecity",era:"end",kind:"turning-point",importance:5,chars:["neo","trinity","smith"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"Blinded but seeing, Neo flies the Logos into 01 to bargain with the Machines against a common enemy: Smith."},
+      {id:"e_truce",title:"The Truce",t:.96,loc:"machinecity",era:"end",kind:"loss",importance:5,chars:["neo","smith"],factions:["crew","agents"],source:"canon",date:"The truce",summary:"Neo lets Smith copy him, then is deleted from within — ending the infection, and the war. Dawn breaks over a freed skyline."},
     ],
   },
 };
@@ -601,14 +708,19 @@ function writeURL(){
 /* ---- DOM ---- */
 const el=id=>document.getElementById(id);
 const setCurrent=(node,on)=>on?node.setAttribute("aria-current","true"):node.removeAttribute("aria-current");
-const camG=el("cam"), gTerrain=el("terrain"), gRoutes=el("routes"), gLoc=el("locations"), gEvt=el("events"), mapEl=el("map");
+const camG=el("cam"), gTerrain=el("terrain"), gRoutes=el("routes"), gLoc=el("locations"), gEvt=el("events"), gFx=el("fx"), mapEl=el("map");
 
 /* =====================================================================
    RENDER
    ===================================================================== */
 function buildTerrain(){
-  gTerrain.innerHTML=""; TERRAIN[state.universe](gTerrain, state.layer);
-  // Low-power tier: drop the GPU-heavy SVG turbulence/displacement filter on terrain.
+  gTerrain.innerHTML="";
+  // Three parallax depth planes: far (distant, moves least), mid (where the
+  // locations live), near (foreground, moves most). See applyCam() for the offset.
+  const far=E("g",{class:"tdepth","data-depth":"0.9"}), mid=E("g",{class:"tdepth","data-depth":"1"}), near=E("g",{class:"tdepth","data-depth":"1.1"});
+  gTerrain.append(far,mid,near);
+  TERRAIN[state.universe]({far,mid,near}, state.layer);
+  // Low-power tier: drop the GPU-heavy SVG turbulence/displacement + elevation filters.
   if(lowPower()) gTerrain.querySelectorAll("[filter]").forEach(n=>n.removeAttribute("filter"));
 }
 
@@ -619,10 +731,11 @@ function buildLocations(){
     g.setAttribute("tabindex","0"); g.setAttribute("role","button"); g.setAttribute("aria-label",`Location: ${l.name}`);
     const fac=byId(U().factions,l.faction);
     g.append(
-      E("circle",{r:6,fill:"var(--u-map-1)",stroke:fac?fac.color:"var(--u-line)","stroke-width":2}),
-      E("circle",{r:2.4,fill:fac?fac.color:"var(--u-line)"}),
+      E("ellipse",{cx:0,cy:7,rx:6,ry:2.2,fill:"#000",opacity:.22}),   // ground shadow (fake elevation)
+      E("circle",{r:6.5,fill:"url(#pin)",stroke:fac?fac.color:"var(--u-line)","stroke-width":2,filter:"url(#elev)"}),
+      E("circle",{r:2.6,fill:fac?fac.color:"var(--u-line)"}),
     );
-    const label=E("text",{x:9,y:4,class:"loc-label"}); label.textContent=l.name; g.append(label);
+    const label=E("text",{x:10,y:4,class:"loc-label"}); label.textContent=l.name; g.append(label);
     const open=()=>selectLocation(l.id);
     g.addEventListener("click",open);
     g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}});
@@ -685,7 +798,16 @@ function renderEvents(){
 
 /* ---- camera ---- */
 let camAnim=null;
-function applyCam(){ const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700; camG.setAttribute("transform",`translate(${1000/2-cx*z},${700/2-cy*z}) scale(${z})`); }
+function applyCam(){
+  const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700;
+  camG.setAttribute("transform",`translate(${1000/2-cx*z},${700/2-cy*z}) scale(${z})`);
+  // Parallax: shift far/near terrain planes relative to the mid plane by their depth.
+  const planes=gTerrain.querySelectorAll(".tdepth");
+  if(FXMOTION()){
+    const px=(state.cam.x-.5), py=(state.cam.y-.5);
+    planes.forEach(g=>{ const k=(parseFloat(g.dataset.depth)||1)-1; g.setAttribute("transform",`translate(${(-px*1000*k*.5).toFixed(1)},${(-py*700*k*.5).toFixed(1)})`); });
+  } else planes.forEach(g=>g.removeAttribute("transform"));
+}
 function flyTo(nx,ny,nz,cb){
   const from={...state.cam}, to={x:nx,y:ny,z:nz};
   if(reduced || lowPower()){ state.cam=to; applyCam(); writeURL(); cb&&cb(); return; }  // no easing in reduced/low-power
@@ -707,7 +829,7 @@ function selectEvent(id){
   state.selectedEvent=id;
   setNow(ev.t,{fromSelect:true});
   flyTo(L.x/1000,L.y/700,2.0);
-  openEventDetail(ev); render(); writeURL();
+  openEventDetail(ev); render(); showArrival(ev); writeURL();
 }
 function selectLocation(id){
   const L=loc(id); if(!L) return;
@@ -773,7 +895,60 @@ el("dClose").onclick=closeDetail;
    TIMELINE
    ===================================================================== */
 const scrub=el("scrub"), fill=el("fill"), playhead=el("playhead"), track=el("track");
+
+/* =====================================================================
+   ARRIVAL FX — a themed pulse at the map location plus a contextual card
+   when a character reaches an important event as the timeline advances.
+   The card carries kind + place + a one-line context, so feedback is more
+   than the repeated event name. Motion self-gates on reduced/low-power.
+   ===================================================================== */
+const KIND_GLYPH={battle:"⚔",journey:"➜","turning-point":"✦",loss:"✧",meeting:"◈",revelation:"❂"};
+function pulseAt(x,y,kind,col){
+  if(lowPower()) return;                              // #fx is hidden in low-power
+  const g=E("g",{transform:`translate(${x},${y})`});
+  const ring=E("circle",{r:6,fill:"none",stroke:col,"stroke-width":3,opacity:reduced?.6:.9});
+  if(!reduced){ ring.appendChild(E("animate",{attributeName:"r",values:"6;46",dur:"0.9s",fill:"freeze"}));
+    ring.appendChild(E("animate",{attributeName:"stroke-width",values:"3;0.4",dur:"0.9s",fill:"freeze"})); }
+  ring.appendChild(E("animate",{attributeName:"opacity",values:reduced?"0.6;0":"0.9;0",dur:reduced?"0.7s":"0.9s",fill:"freeze"}));
+  g.appendChild(ring);
+  if(!reduced){
+    const glyph=E("text",{x:0,y:-14,"text-anchor":"middle","font-size":16,fill:col,opacity:0}); glyph.textContent=KIND_GLYPH[kind]||"✦";
+    glyph.appendChild(E("animate",{attributeName:"opacity",values:"0;1;0",dur:"1.1s",fill:"freeze"}));
+    glyph.appendChild(E("animate",{attributeName:"y",values:"-10;-28",dur:"1.1s",fill:"freeze"}));
+    g.appendChild(glyph);
+  }
+  gFx.appendChild(g); setTimeout(()=>g.remove(),1200);
+}
+let arrivalTimer;
+function showArrival(ev){
+  const L=loc(ev.loc); if(!L) return;
+  const fac=byId(U().factions,ev.factions&&ev.factions[0]);
+  const col=ev.source==="canon"?(fac?fac.color:"var(--u-primary)"):"var(--u-danger)";
+  pulseAt(L.x,L.y,ev.kind,col);
+  const card=el("arrivalCard");
+  const who=ev.chars.map(c=>byId(U().characters,c)).filter(Boolean).map(c=>c.name).join(", ");
+  const first=(ev.summary||"").split(/(?<=[.!?])\s/)[0];
+  card.innerHTML=`<div class="ac-kind"><span class="ac-glyph">${esc(KIND_GLYPH[ev.kind]||"✦")}</span>${esc(ev.kind.replace("-"," "))} · ${esc(L.name)}</div>
+    <h4>${esc(ev.title)}</h4><p>${esc(first)}</p>${who?`<div class="ac-who">${esc(who)}</div>`:""}`;
+  positionArrivalCard(card,L.x,L.y);
+  card.classList.add("show"); clearTimeout(arrivalTimer);
+  arrivalTimer=setTimeout(()=>card.classList.remove("show"),2800);
+}
+function positionArrivalCard(card,X,Y){
+  // Anchor to camG (always rendered) — gFx is display:none in low-power, so its CTM is null there.
+  try{ const pt=mapEl.createSVGPoint(); pt.x=X; pt.y=Y; const s=pt.matrixTransform(camG.getScreenCTM());
+    const st=el("stage").getBoundingClientRect();
+    card.style.left=clamp(s.x-st.left,120,st.width-120)+"px"; card.style.top=clamp(s.y-st.top,90,st.height-40)+"px";
+  }catch(e){ card.style.left="50%"; card.style.top="96px"; }
+}
+function fireArrivalsBetween(a,b){
+  if(b<=a || (b-a)>0.06) return;                      // only forward playback / small scrubs, not big jumps
+  const hit=visibleEvents().filter(ev=>ev.importance>=4 && ev.t>a && ev.t<=b).sort((p,q)=>p.t-q.t)[0];
+  if(hit) showArrival(hit);
+}
+
 function setNow(t,opts={}){
+  const prev=state.now;
   state.now=clamp(t,0,1);
   scrub.value=Math.round(state.now*1000);
   const pct=state.now*100; fill.style.width=pct+"%"; playhead.style.left=pct+"%";
@@ -782,7 +957,7 @@ function setNow(t,opts={}){
   el("nowYear").textContent=U().timeSub+" · "+era.name;
   el("eraLabel").innerHTML=`<b>${era.name}</b><br><span style="opacity:.7">${era.blurb}</span>`;
   renderRoutes(); renderEvents(); markTicks();
-  if(!opts.fromSelect) writeURL();
+  if(!opts.fromSelect){ fireArrivalsBetween(prev,state.now); writeURL(); }  // arrivals on scrub/playback; selection fires its own
 }
 scrub.addEventListener("input",()=>{ pause(); setNow(scrub.value/1000); });
 
@@ -960,13 +1135,14 @@ function toast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("sh
    ===================================================================== */
 function render(){ renderRoutes(); renderEvents(); markTicks(); applyCam(); }
 function boot(){
+  const hadT=new URLSearchParams(location.search).has("t");
   readURL();
   applyUniverseChrome();
   searchIdx=buildSearchIndex();
   buildTerrain(); buildLocations(); buildTicks();
   applyCam(); setNow(state.now,{fromSelect:true}); render();
-  if(state.selectedEvent){ const ev=byId(U().events,state.selectedEvent); if(ev){ ensureLayerFor(ev.loc); openEventDetail(ev,{skipFocus:true}); buildLocations(); buildTicks(); render(); } }
-  else if(state.selectedChar) selectCharacter(state.selectedChar);
+  if(state.selectedEvent){ const ev=byId(U().events,state.selectedEvent); if(ev){ ensureLayerFor(ev.loc); if(!hadT) setNow(ev.t,{fromSelect:true}); openEventDetail(ev,{skipFocus:true}); buildLocations(); buildTicks(); render(); } }
+  else if(state.selectedChar){ const id=state.selectedChar; state.selectedChar=null; selectCharacter(id); }  // clear first so the toggle opens (not closes) the panel
   toast("Switch worlds up top · scrub or press ▶ to watch a journey unfold");
 }
 boot();
