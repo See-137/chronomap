@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Chronomap — Fictional Universes Timeline Map</title>
-<meta name="description" content="Interactive timeline-map across three fictional universes: Middle-earth, Wizarding Britain, and The Matrix. Non-WebGL 2D tier." />
+<meta name="description" content="Interactive timeline-map across three fictional universes: Middle-earth, Wizarding Britain, and Narnia. Non-WebGL 2D tier." />
 <!-- Defense-in-depth for a static single-file app. GitHub Pages can't set real HTTP
      headers, so this <meta> CSP is the only lever. Inline script/style require
      'unsafe-inline'; there is no attacker-reachable HTML sink today (all innerHTML is
@@ -21,7 +21,7 @@
        universe            -> separate map (own layers[], theme, timeline)
        book vs film        -> SAME map, `source` tag + canon toggle
        in-world alt space  -> separate MapLayer within the universe
-                              (Matrix simulation vs. real world)
+                              (e.g. a dream/mirror realm vs. the waking world)
      ============================================================ */
   :root {
     /* Base tokens — overwritten per-universe by applyTheme() in JS. */
@@ -277,7 +277,7 @@
   <div style="max-width:640px;margin:12vh auto;padding:24px;font-family:system-ui,sans-serif;line-height:1.5;text-align:center;color:#241a10;">
     <h1 style="font-family:Georgia,serif;">Chronomap</h1>
     <p>This interactive timeline-map needs JavaScript to run. Please enable JavaScript to explore
-    Middle-earth, Wizarding Britain, and The Matrix.</p>
+    Middle-earth, Wizarding Britain, and Narnia.</p>
   </div>
 </noscript>
 <div class="app" id="app">
@@ -380,6 +380,7 @@
       <button id="zout" aria-label="Zoom out">－</button>
       <button id="zreset" aria-label="Reset view" title="Reset view">⟳</button>
       <button class="render-toggle" id="renderToggle" title="Simulate no-WebGL / low-power" aria-pressed="false">2D ✓</button>
+      <button class="render-toggle" id="audioToggle" title="Ambient sound" aria-label="Ambient sound" aria-pressed="false">♪ off</button>
     </div>
 
     <aside class="detail" id="detail" aria-live="polite">
@@ -417,7 +418,6 @@
    ===================================================================== */
 const SERIF = '"Iowan Old Style","Palatino Linotype",Georgia,serif';
 const UI = 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
-const MONO = '"JetBrains Mono","IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace';
 const THEMES = {
   lotr: { text:"#241a10", panel:"#e9ddc2", panel2:"#ded0ad", primary:"#b8863b", primaryInk:"#241a10",
     secondary:"#7d5a24", danger:"#7c2d2d", forest:"#4c6141", water:"#6f8ba0", line:"#5b4a2f",
@@ -431,12 +431,12 @@ const THEMES = {
     map1:"#efe6d2", map2:"#d7c9ac", body1:"#f2ead6", body2a:"#e4dcc6", body2b:"#d0c3a8",
     headerBg:"#241033", headerText:"#f2e9d8", footerBg:"#1a0c28", footerText:"#f2e9d8",
     land:"#ded2b3", landStroke:"#a99a6f", serif:SERIF, ui:UI },
-  matrix: { text:"#bdf5d0", panel:"#0c150e", panel2:"#0f1b12", primary:"#22c55e", primaryInk:"#04150a",
-    secondary:"#1f7a45", danger:"#f0466a", forest:"#22c55e", water:"#67e8f9", line:"#1f7a45",
-    chipBg:"rgba(34,197,94,.08)", track:"rgba(34,197,94,.2)", playhead:"#eafff2", labelHalo:"rgba(3,8,4,.9)",
-    map1:"#08120a", map2:"#040705", body1:"#06110a", body2a:"#050b06", body2b:"#020402",
-    headerBg:"#04100a", headerText:"#bdf5d0", footerBg:"#040b06", footerText:"#bdf5d0",
-    land:"#0a1a0e", landStroke:"#1f7a45", serif:MONO, ui:MONO },
+  narnia: { text:"#3a2a18", panel:"#efe2c4", panel2:"#e4d3ac", primary:"#c99a3a", primaryInk:"#2a1e0e",
+    secondary:"#8a5a2b", danger:"#5b7fa6", forest:"#4a7042", water:"#6f97b8", line:"#6a4a2a",
+    chipBg:"rgba(255,255,255,.4)", track:"rgba(201,154,58,.26)", playhead:"#fff8e8", labelHalo:"rgba(239,226,196,.9)",
+    map1:"#f0e4c6", map2:"#dcc79a", body1:"#f3ead0", body2a:"#e8dabb", body2b:"#dcc99e",
+    headerBg:"#2e2012", headerText:"#efe2c4", footerBg:"#241809", footerText:"#efe2c4",
+    land:"#ddca9f", landStroke:"#a98a5a", serif:SERIF, ui:UI },
 };
 function applyTheme(id){
   const t=THEMES[id], r=document.documentElement.style, m={
@@ -584,44 +584,43 @@ const TERRAIN = {
     near.appendChild(E("path",{d:"M300,110 q10,-4 20,0 M840,150 q10,-4 20,0 M760,560 q10,-4 20,0", fill:"none", stroke:"var(--u-water)","stroke-width":1, opacity:.2, class:"texfx"}));
     cartouche(near,742,168,206,"Wizarding Britain","HARRY'S STORY · 1991–1998");
   },
-  matrix({far,mid,near}, layer){
-    if(layer==="sim"){
-      // Deep base grid (far) + bright working grid (mid) — a city in code.
-      for(let x=0;x<=1000;x+=50) far.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)","stroke-width":.5, opacity:.07, class:"texfx"}));
-      for(let y=0;y<=700;y+=50) far.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)","stroke-width":.5, opacity:.07, class:"texfx"}));
-      // ground plane glow + perspective streets converging to a vanishing point
-      mid.appendChild(E("rect",{x:0,y:470,width:1000,height:230, fill:"url(#seaDepth)", opacity:.5}));
-      for(let i=-6;i<=6;i++){ mid.appendChild(E("line",{x1:500+i*24,y1:470,x2:500+i*150,y2:700, stroke:"var(--u-primary)","stroke-width":.6, opacity:.14, class:"texfx"})); }
-      for(let i=1;i<=5;i++){ const y=470+i*i*7; mid.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-primary)","stroke-width":.6, opacity:.12, class:"texfx"})); }
-      const r=rng(11);
-      // city skyline — layered building blocks with lit windows
-      for(let i=0;i<26;i++){ const bx=r()*960+8, bw=16+r()*40, bh=50+r()*150, by=470-bh;
-        mid.appendChild(E("rect",{x:bx.toFixed(1),y:by.toFixed(1),width:bw.toFixed(1),height:bh.toFixed(1), fill:"var(--u-primary)", opacity:.05, stroke:"var(--u-primary)","stroke-width":.7, "stroke-opacity":.22}));
-        for(let w=0;w<Math.floor(bh/14);w++){ if(r()>.6) mid.appendChild(E("rect",{x:(bx+4+ (r()>.5?bw-8:0)).toFixed(1), y:(by+6+w*14).toFixed(1), width:2.5, height:2.5, fill:"var(--u-primary)", opacity:(.2+r()*.5).toFixed(2), class:"texfx"})); } }
-      for(let i=0;i<60;i++){ mid.appendChild(E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*460).toFixed(1), r:(r()*1.6+.4).toFixed(2), fill:"var(--u-primary)", opacity:r()*.5+.1, filter:"url(#glow)", class:"texfx"})); }
-      for(let i=0;i<16;i++){ const x=r()*1000, y=r()*380; const ln=E("line",{x1:x.toFixed(1),y1:y.toFixed(1),x2:x.toFixed(1),y2:(y+90).toFixed(1), stroke:"var(--u-primary)","stroke-width":1, opacity:.16, class:"texfx"});
-        if(FXMOTION()){ const dur=(2.4+r()*3).toFixed(2)+"s"; ln.appendChild(E("animateTransform",{attributeName:"transform",type:"translate",from:"0 -160",to:"0 760",dur,repeatCount:"indefinite",begin:(-r()*4).toFixed(2)+"s"})); }
-        near.appendChild(ln); }
-      cartouche(near,500,64,224,"The Simulation","SIMULATED · READS AS c.1999");
-    } else {
-      const r=rng(5);
-      // Real world — a dark cavern: rock strata, tunnels, Zion, Machine City.
-      for(let i=0;i<8;i++){ const y=70+i*90; far.appendChild(E("path",{d:`M0,${y} Q 500,${y-34} 1000,${y}`, fill:"none", stroke:"var(--u-secondary)","stroke-width":1, opacity:.12, class:"texfx"})); }
-      for(let i=0;i<160;i++){ far.appendChild(E("circle",{cx:(r()*1000).toFixed(1),cy:(r()*700).toFixed(1),r:(r()*.8+.2).toFixed(2), fill:"var(--u-secondary)", opacity:(.06+r()*.1).toFixed(2), class:"texfx"})); } // rock grain
-      for(let i=0;i<11;i++){ const sx=r()*340+60, sy=r()*540+90; mid.appendChild(E("path",{d:`M${sx.toFixed(0)},${sy.toFixed(0)} Q ${((sx+820)/2).toFixed(0)},${((sy+300)/2+(r()*150-75)).toFixed(0)} 820,300`, fill:"none", stroke:"var(--u-secondary)","stroke-width":1, opacity:.26, class:"texfx"})); }
-      // Zion — concentric cavern city
-      for(let i=4;i>=1;i--) mid.appendChild(E("circle",{cx:300,cy:560,r:22*i, fill:"none", stroke:"var(--u-forest)","stroke-width":1, opacity:.1*i, class:"texfx"}));
-      mid.appendChild(E("circle",{cx:300,cy:560,r:30, fill:"var(--u-forest)", opacity:.08}));
-      // Machine City — burning heart
-      mid.appendChild(E("circle",{cx:820,cy:300,r:80, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.26, filter:"url(#glow)"}));
-      mid.appendChild(E("circle",{cx:820,cy:300,r:60, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.3}));
-      mid.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.45}));
-      region(mid,300,466,"Zion"); region(mid,820,196,"01 · Machine City",{size:13});
-      cartouche(near,500,64,224,"The Real World","YEAR UNKNOWN · c.2199 DISPUTED");
-      for(let i=0;i<50;i++){ const c=E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:.7, fill:"var(--u-danger)", opacity:.2+r()*.2, class:"texfx"});
-        if(FXMOTION() && r()>.7){ c.appendChild(E("animate",{attributeName:"opacity",values:"0.1;0.5;0.1",dur:(1.5+r()*2).toFixed(2)+"s",repeatCount:"indefinite"})); }
-        near.appendChild(c); }
-    }
+  narnia({far,mid,near}){
+    // The Great Eastern Sea (right edge), where Cair Paravel stands on the coast.
+    const seaD="M790,88 C 812,180 806,300 800,400 C 796,482 820,560 812,624 L1012,624 L1012,88 Z";
+    far.appendChild(E("path",{d:seaD, fill:"var(--u-water)", opacity:.3}));
+    far.appendChild(E("path",{d:seaD, fill:"url(#seaDepth)", opacity:.5}));
+    const rs=rng(23);
+    for(let i=0;i<24;i++){ const x=832+rs()*168, y=100+rs()*500, w=E("path",{d:`M${x.toFixed(0)},${y.toFixed(0)} q8,-3 16,0`, fill:"none", stroke:"#fff","stroke-width":.8, opacity:.16, class:"texfx"});
+      if(FXMOTION()) w.appendChild(E("animate",{attributeName:"opacity",values:"0.05;0.22;0.05",dur:(3+rs()*3).toFixed(1)+"s",repeatCount:"indefinite"})); far.appendChild(w); }
+    // The land of Narnia & Archenland — an eastern coast on the Great Sea.
+    paintLand({far,mid,near},"M60,142 C 200,92 384,94 512,114 C 640,132 724,120 790,178 C 818,214 816,282 808,334 C 800,394 826,462 790,520 C 752,580 634,570 514,600 C 396,626 256,620 148,560 C 58,500 44,380 56,292 C 62,222 46,192 60,142 Z",
+      {zones:[[300,300,180,140,"lowland"],[520,420,150,120,"lowland"],[340,180,110,90,"upland"]]});
+    // The Great River — western highlands east to the sea at Cair Paravel — + tributaries.
+    river(mid,[[188,200],[300,268],[420,300],[540,318],[660,320],[772,318]],{w:6});
+    river(mid,[[420,300],[432,384],[452,470]],{w:2.6});   // the Rush, south to the Stone Table
+    river(mid,[[300,268],[250,340],[212,420]],{w:2.4});   // western tributary
+    // Frozen pool — a mark of the Witch's endless winter.
+    mid.appendChild(E("ellipse",{cx:428,cy:250,rx:32,ry:19, fill:"var(--u-danger)", opacity:.22}));
+    mid.appendChild(E("ellipse",{cx:428,cy:250,rx:32,ry:19, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.4, class:"texfx"}));
+    // Mountain ranges — Northern (Ettinsmoor), Western Wild, Southern (Archenland / Mt Pire).
+    range(mid,[[150,150],[262,132],[382,128],[500,140]],{h:22,w:13,snow:true,seed:41,spacing:24});
+    range(mid,[[70,300],[96,378],[112,458]],{h:16,w:11,snow:true,seed:42,spacing:22});
+    range(mid,[[298,566],[402,576],[506,566],[606,554]],{h:20,w:12,snow:true,seed:43,spacing:24});
+    // Forests — Lantern Waste, Shuddering Wood, the Great Woods, the Dancing Lawn.
+    canopy(mid,190,252,40,44,84,51,"var(--u-forest)");   // Lantern Waste
+    canopy(mid,322,340,44,34,70,52);                      // Shuddering Wood
+    canopy(mid,548,402,40,32,62,53);                      // the Great Woods (by the Stone Table)
+    canopy(mid,474,470,26,20,30,54);                      // the Dancing Lawn
+    stipple(mid,380,300,700,470,110,55,{col:"var(--u-forest)",opacity:.14});
+    // Cair Paravel gleaming on the eastern shore.
+    mid.appendChild(E("circle",{cx:800,cy:300,r:11, fill:"var(--u-primary)", opacity:.5, filter:"url(#glow)"}));
+    // Roads — the way north to the Witch's castle and south to Archenland.
+    road(mid,[[300,268],[360,200],[400,150]],{});
+    road(mid,[[452,470],[500,540],[520,590]],{dash:"3 7",opacity:.3});
+    region(mid,360,96,"Ettinsmoor",{size:14}); region(mid,182,132,"Lantern Waste",{size:12});
+    region(mid,566,236,"Narnia"); region(mid,360,606,"Archenland");
+    region(far,908,362,"The Eastern Sea",{size:12});
+    cartouche(near,252,66,214,"Narnia","THE LION, THE WITCH & THE WARDROBE");
   },
 };
 
@@ -754,64 +753,55 @@ const UNIVERSES = {
     ],
   },
 
-  /* ---------------- THE MATRIX ---------------- */
-  matrix: {
-    id:"matrix", name:"The Matrix", tagline:"Neo's Path · simulated ↔ real",
-    timeSub:"In-film chronology", axisFrom:"“The One” is found", axisTo:"The end of the Machine War",
-    note:"Two coupled spaces, one universe. The simulation reads as ~1999 by design; the real-world year is unknown — Morpheus guesses “closer to 2199,” disputed. Toggle the reality layer to switch spaces.",
-    layers:[{id:"sim", name:"Simulation", kind:"primary"},{id:"real", name:"Real World", kind:"alternate"}],
-    dateAnchors:[[0,"Sim: ~1999"],[.10,"Real: ~2199 (disputed)"],[.25,"Sim: ~1999"],[.40,"Reloaded"],[.55,"Reloaded"],[.72,"Revolutions"],[.90,"Revolutions"],[1,"The truce"]],
+  /* ---------------- NARNIA ---------------- */
+  narnia: {
+    id:"narnia", name:"Narnia", tagline:"The Lion, the Witch & the Wardrobe",
+    timeSub:"The Chronicles of Narnia", axisFrom:"Lucy steps through the wardrobe", axisTo:"Crowned at Cair Paravel",
+    layers:[{id:"narnia", name:"Narnia", kind:"primary"}],
+    dateAnchors:[[0,"Always winter"],[.14,"Winter deepens"],[.30,"The thaw begins"],[.48,"Aslan on the move"],[.66,"The Stone Table"],[.74,"Deep Magic"],[.85,"Spring at last"],[1,"The Golden Age"]],
     eras:[
-      {id:"awaken",name:"Awakening",from:0,to:.40,blurb:"A hacker is offered a choice between two pills."},
-      {id:"one",name:"The One Confirmed",from:.40,to:.72,blurb:"Purpose, prophecy, and the Architect's arithmetic."},
-      {id:"end",name:"The End of the War",from:.72,to:1,blurb:"Zion holds; a bargain is struck at the Machine City."},
+      {id:"winter",name:"The Long Winter",from:0,to:.30,blurb:"Always winter and never Christmas, under the White Witch."},
+      {id:"thaw",name:"The Thaw",from:.30,to:.66,blurb:"Aslan is on the move; the snow begins to melt."},
+      {id:"spring",name:"The Golden Age",from:.66,to:1,blurb:"Deep Magic, a great battle, and four thrones filled."},
     ],
-    factions:[{id:"crew",name:"Neb Crew / Zion",color:"#22c55e"},{id:"agents",name:"Agents / Machines",color:"#f0466a"},{id:"exiles",name:"Exile Programs",color:"#67e8f9"}],
+    factions:[{id:"narnians",name:"Narnians",color:"#c99a3a"},{id:"witch",name:"The White Witch",color:"#5b7fa6"},{id:"wild",name:"Wood & Beast",color:"#4a7042"}],
     locations:[
-      // simulation layer
-      {id:"hotel",name:"Heart O' the City Hotel",type:"landmark",layer:"sim",x:300,y:250,faction:"crew",blurb:"Room 303 — where Trinity is cornered, and where the red pill is offered."},
-      {id:"metacortex",name:"MetaCortex",type:"city",layer:"sim",x:520,y:300,faction:"agents",blurb:"Thomas Anderson's software job — and the ledge he refuses to climb."},
-      {id:"oracle",name:"The Oracle",type:"landmark",layer:"sim",x:400,y:460,faction:"crew",blurb:"A kindly program in a kitchen, baking cookies and truths."},
-      {id:"govt",name:"Government Lobby",type:"fortress",layer:"sim",x:300,y:360,faction:"agents",blurb:"Guns. Lots of guns. The rescue of Morpheus begins here."},
-      {id:"freeway",name:"The Freeway",type:"wild",layer:"sim",x:560,y:500,faction:"exiles",blurb:"Fourteen miles of chase for the Keymaker — “nobody comes back.”"},
-      {id:"source",name:"The Source",type:"portal",layer:"sim",x:700,y:160,faction:"agents",blurb:"The Architect's white room, where the One's true purpose is revealed."},
-      // real layer
-      {id:"pod",name:"The Power Plant",type:"landmark",layer:"real",x:600,y:200,faction:"agents",blurb:"A field of pods; Neo wakes, unplugged, and is flushed into the real."},
-      {id:"neb",name:"The Nebuchadnezzar",type:"vessel",layer:"real",x:360,y:300,faction:"crew",blurb:"Morpheus's hovercraft — home, training deck, and broadcast point."},
-      {id:"zion",name:"Zion",type:"city",layer:"real",x:300,y:560,faction:"crew",blurb:"The last human city, deep near the warm core of the Earth."},
-      {id:"dock",name:"The Dock of Zion",type:"fortress",layer:"real",x:430,y:470,faction:"crew",blurb:"Where APUs stand against a quarter-million Sentinels."},
-      {id:"logos",name:"The Logos",type:"vessel",layer:"real",x:520,y:360,faction:"crew",blurb:"Niobe's fast ship; it carries Neo and Trinity toward 01."},
-      {id:"machinecity",name:"Machine City (01)",type:"portal",layer:"real",x:820,y:300,faction:"agents",blurb:"The heart of the Machines, where a blind man walks in to make peace."},
+      {id:"lamppost",name:"The Lamp-post",type:"landmark",layer:"narnia",x:170,y:240,faction:"wild",blurb:"Where Lucy steps out of the wardrobe into a snowy wood — a lamp-post burning among the trees of Lantern Waste."},
+      {id:"tumnus",name:"Mr Tumnus's Cave",type:"landmark",layer:"narnia",x:150,y:292,faction:"narnians",blurb:"The faun's home, where Lucy takes tea — and a kindly kidnapper repents."},
+      {id:"beaver",name:"The Beavers' House",type:"landmark",layer:"narnia",x:320,y:300,faction:"narnians",blurb:"A dam on the Great River, where the children first hear of Aslan and the old prophecy."},
+      {id:"witchcastle",name:"The White Witch's Castle",type:"fortress",layer:"narnia",x:360,y:132,faction:"witch",blurb:"A courtyard of stone statues — everyone who ever crossed the self-styled Queen of Narnia."},
+      {id:"dancinglawn",name:"The Dancing Lawn",type:"landmark",layer:"narnia",x:474,y:470,faction:"wild",blurb:"A ring of grass where fauns and dryads dance — until the Witch's wolves break up the party."},
+      {id:"beruna",name:"The Fords of Beruna",type:"landmark",layer:"narnia",x:520,y:330,faction:"narnians",blurb:"The Great River's crossing, and the field where the last battle of the winter is fought."},
+      {id:"aslancamp",name:"Aslan's Camp",type:"city",layer:"narnia",x:604,y:344,faction:"narnians",blurb:"A pavilion of banners by the Fords, where the Great Lion gathers all of free Narnia."},
+      {id:"stonetable",name:"The Stone Table",type:"landmark",layer:"narnia",x:544,y:402,faction:"narnians",blurb:"An ancient dais carved with the Deep Magic from the dawn of time — and the price it demands of traitors."},
+      {id:"anvard",name:"Anvard",type:"fortress",layer:"narnia",x:400,y:560,faction:"wild",blurb:"The keep of Archenland, beyond the southern mountains and Mount Pire."},
+      {id:"cairparavel",name:"Cair Paravel",type:"city",layer:"narnia",x:800,y:300,faction:"narnians",blurb:"The castle of four thrones on the Eastern Sea, awaiting two Sons of Adam and two Daughters of Eve."},
     ],
     characters:[
-      {id:"neo",name:"Neo",color:"#22c55e",role:"The One",blurb:"A hacker who learns the world is a lie, and chooses to end a war on his own terms."},
-      {id:"trinity",name:"Trinity",color:"#67e8f9",role:"Neb crew",blurb:"The one who watches over him — across the simulation and the real."},
-      {id:"morpheus",name:"Morpheus",color:"#e0b341",role:"Captain of the Nebuchadnezzar",blurb:"The believer who offers the choice, frees Neo's mind, and never wavers in the prophecy."},
-      {id:"smith",name:"Agent Smith",color:"#f0466a",role:"Rogue program",blurb:"The system's enforcer turned virus — unbound, self-copying, and bent on unmaking everything, real and simulated."},
+      {id:"lucy",name:"Lucy Pevensie",color:"#c99a3a",role:"Queen Lucy the Valiant",blurb:"The youngest, who finds Narnia first and never once stops believing in it."},
+      {id:"edmund",name:"Edmund Pevensie",color:"#a06a2c",role:"King Edmund the Just",blurb:"The brother who betrays them for Turkish Delight — and is bought back at a terrible price."},
+      {id:"aslan",name:"Aslan",color:"#d98a2b",role:"The Great Lion",blurb:"Son of the Emperor-over-the-Sea, who knows a Deeper Magic than the Witch ever read."},
+      {id:"jadis",name:"The White Witch",color:"#5b7fa6",role:"Queen Jadis",blurb:"The usurper who holds Narnia in a hundred years of winter and calls herself its Queen."},
     ],
     routes:[
-      {id:"r_neo_sim",characterId:"neo",layer:"sim",waypoints:[["metacortex",.02],["hotel",.08],["oracle",.25],["govt",.34],["freeway",.55],["source",.66]]},
-      {id:"r_neo_real",characterId:"neo",layer:"real",waypoints:[["pod",.10],["neb",.14],["zion",.50],["logos",.78],["machinecity",.90]]},
-      {id:"r_trin_real",characterId:"trinity",layer:"real",waypoints:[["neb",.14],["zion",.50],["logos",.78],["machinecity",.88]]},
-      {id:"r_morph_sim",characterId:"morpheus",layer:"sim",waypoints:[["hotel",.08],["govt",.34]]},
-      {id:"r_morph_real",characterId:"morpheus",layer:"real",waypoints:[["neb",.14],["zion",.50],["dock",.80]]},
-      {id:"r_smith_sim",characterId:"smith",layer:"sim",waypoints:[["metacortex",.02],["govt",.34],["freeway",.55],["oracle",.82]]},
+      {id:"r_lucy",characterId:"lucy",layer:"narnia",waypoints:[["lamppost",.02],["tumnus",.08],["beaver",.26],["aslancamp",.52],["stonetable",.66],["beruna",.88],["cairparavel",.96]]},
+      {id:"r_edmund",characterId:"edmund",layer:"narnia",waypoints:[["lamppost",.05],["witchcastle",.16],["beaver",.26],["witchcastle",.44],["aslancamp",.58],["beruna",.88],["cairparavel",.96]]},
+      {id:"r_aslan",characterId:"aslan",layer:"narnia",waypoints:[["aslancamp",.52],["stonetable",.66],["witchcastle",.80],["beruna",.88],["cairparavel",.96]]},
+      {id:"r_jadis",characterId:"jadis",layer:"narnia",waypoints:[["witchcastle",.16],["dancinglawn",.30],["stonetable",.66],["beruna",.88]]},
     ],
     events:[
-      {id:"e_rabbit",title:"Follow the White Rabbit",t:.03,loc:"hotel",era:"awaken",kind:"revelation",importance:4,chars:["neo","trinity"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"A message on a black screen leads Neo to Trinity, and to a question about the nature of the world."},
-      {id:"e_redpill",title:"The Red Pill",t:.08,loc:"hotel",era:"awaken",kind:"turning-point",importance:5,chars:["neo","morpheus"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"“You take the red pill, you stay in Wonderland.” Morpheus offers the choice; Neo chooses to see how deep the rabbit hole goes."},
-      {id:"e_wake",title:"Neo Wakes in the Pod",t:.10,loc:"pod",era:"awaken",kind:"turning-point",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Real: ~2199 (disputed)",summary:"Neo opens real eyes for the first time in a vast field of harvested bodies — and is flushed out to be reborn. The real-world year is only Morpheus's guess."},
-      {id:"e_oracle",title:"Visiting the Oracle",t:.25,loc:"oracle",era:"awaken",kind:"meeting",importance:4,chars:["neo"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"“Being the One is like being in love.” A prophecy is offered, and quietly undercut."},
-      {id:"e_lobby",title:"Rescuing Morpheus",t:.34,loc:"govt",era:"awaken",kind:"battle",importance:4,chars:["neo","trinity","morpheus"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"Neo and Trinity storm the lobby to save Morpheus from the Agents — and Neo begins to bend the rules."},
-      {id:"e_smith",title:"Agent Smith Unbound",t:.38,loc:"govt",era:"awaken",kind:"turning-point",importance:4,chars:["neo","smith"],factions:["agents"],source:"canon",date:"Sim: ~1999",summary:"Neo destroys Smith from the inside — but the Agent survives, cut loose from the system and free to copy himself without limit."},
-      {id:"e_zion",title:"Zion",t:.50,loc:"zion",era:"one",kind:"meeting",importance:4,chars:["neo","trinity","morpheus"],factions:["crew"],source:"canon",date:"Reloaded",summary:"The last human city dances in the dark, then musters to face an approaching army of machines."},
-      {id:"e_freeway",title:"The Freeway Chase",t:.55,loc:"freeway",era:"one",kind:"journey",importance:3,chars:["trinity"],factions:["crew","exiles"],source:"canon",date:"Reloaded",summary:"A running battle for the Keymaker across fourteen miles of oncoming traffic."},
-      {id:"e_burly",title:"The Burly Brawl",t:.58,loc:"freeway",era:"one",kind:"battle",importance:3,chars:["neo","smith"],factions:["crew","agents"],source:"canon",date:"Reloaded",summary:"A hundred copied Smiths swarm Neo — the rogue program has become a plague spreading through the simulation."},
-      {id:"e_source",title:"The Architect",t:.66,loc:"source",era:"one",kind:"revelation",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Reloaded",summary:"The One is not a savior but a system of control — the sixth iteration. Neo refuses the arithmetic and chooses Trinity."},
-      {id:"e_dock",title:"The Battle of Zion",t:.80,loc:"dock",era:"end",kind:"battle",importance:5,chars:["morpheus"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"In the dock, APU pilots and a boy named Kid hold the line against a flood of Sentinels."},
-      {id:"e_smithoracle",title:"Smith Takes the Oracle",t:.82,loc:"oracle",era:"end",kind:"loss",importance:4,chars:["smith"],factions:["agents"],source:"canon",date:"Revolutions",summary:"Smith assimilates the Oracle herself — gaining her sight, and with it the certainty that he has already won."},
-      {id:"e_city",title:"Neo Reaches Machine City",t:.90,loc:"machinecity",era:"end",kind:"turning-point",importance:5,chars:["neo","trinity","smith"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"Blinded but seeing, Neo flies the Logos into 01 to bargain with the Machines against a common enemy: Smith."},
-      {id:"e_truce",title:"The Truce",t:.96,loc:"machinecity",era:"end",kind:"loss",importance:5,chars:["neo","smith"],factions:["crew","agents"],source:"canon",date:"The truce",summary:"Neo lets Smith copy him, then is deleted from within — ending the infection, and the war. Dawn breaks over a freed skyline."},
+      {id:"e_wardrobe",title:"Through the Wardrobe",t:.02,loc:"lamppost",era:"winter",kind:"revelation",importance:5,chars:["lucy"],factions:["wild"],source:"canon",date:"Always winter",summary:"Lucy pushes past the fur coats into a snowy wood, where a lamp-post burns among the trees and a faun is carrying parcels home."},
+      {id:"e_tumnus",title:"Tea with Mr Tumnus",t:.08,loc:"tumnus",era:"winter",kind:"meeting",importance:4,chars:["lucy"],factions:["narnians"],source:"canon",date:"Always winter",summary:"A faun plays a lullaby meant to lull Lucy for the Witch — then, weeping, sets her free instead."},
+      {id:"e_edmund_witch",title:"Edmund and the Witch",t:.16,loc:"witchcastle",era:"winter",kind:"turning-point",importance:4,chars:["edmund","jadis"],factions:["witch"],source:"canon",date:"Always winter",summary:"On a sledge in the snow the White Witch feeds Edmund enchanted Turkish Delight, and a promise of a crown if he brings his siblings."},
+      {id:"e_beavers",title:"The Beavers' Warning",t:.26,loc:"beaver",era:"winter",kind:"meeting",importance:4,chars:["lucy","edmund"],factions:["narnians"],source:"canon",date:"Winter deepens",summary:"Over dinner the Beavers tell of Aslan on the move, and the prophecy of two Sons of Adam and two Daughters of Eve on the thrones of Cair Paravel."},
+      {id:"e_betray",title:"Edmund's Betrayal",t:.44,loc:"witchcastle",era:"thaw",kind:"loss",importance:4,chars:["edmund","jadis"],factions:["witch"],source:"canon",date:"The thaw begins",summary:"Edmund slips away to claim his reward — and finds only a dungeon, a courtyard of stone, and a Witch whose thaw has ruined her plans."},
+      {id:"e_camp",title:"Aslan's Camp",t:.52,loc:"aslancamp",era:"thaw",kind:"meeting",importance:5,chars:["lucy","aslan"],factions:["narnians"],source:"canon",date:"Aslan on the move",summary:"The children come to the Lion's pavilion by the Fords; Aslan promises to do all he can for their brother."},
+      {id:"e_rescue",title:"Edmund Rescued",t:.58,loc:"aslancamp",era:"thaw",kind:"turning-point",importance:4,chars:["edmund","aslan"],factions:["narnians","witch"],source:"canon",date:"Aslan on the move",summary:"Aslan's host frees Edmund from the Witch; the Lion walks with him alone at dawn, and what is said between them is never repeated."},
+      {id:"e_table",title:"The Stone Table",t:.66,loc:"stonetable",era:"spring",kind:"loss",importance:5,chars:["aslan","jadis","lucy"],factions:["narnians","witch"],source:"canon",date:"The Stone Table",summary:"By the Deep Magic the Witch claims a traitor's blood. Aslan offers his own instead; bound and shorn, he is slain upon the Table in the dark."},
+      {id:"e_deeper",title:"The Deeper Magic",t:.74,loc:"stonetable",era:"spring",kind:"turning-point",importance:5,chars:["aslan","lucy"],factions:["narnians"],source:"canon",date:"Deep Magic",summary:"At sunrise the Table cracks in two: a magic from before the dawn of time works Death backward, and Aslan is alive again."},
+      {id:"e_statues",title:"The Witch's Courtyard",t:.80,loc:"witchcastle",era:"spring",kind:"revelation",importance:4,chars:["aslan"],factions:["narnians","witch"],source:"canon",date:"Spring at last",summary:"Aslan leaps the castle wall and breathes life back into the Witch's stone victims, then leads them out to war."},
+      {id:"e_beruna",title:"The Battle of Beruna",t:.88,loc:"beruna",era:"spring",kind:"battle",importance:5,chars:["edmund","aslan","jadis"],factions:["narnians","witch"],source:"canon",date:"Spring at last",summary:"Edmund shatters the Witch's wand before he falls; Aslan ends her, and the long winter breaks for good."},
+      {id:"e_crown",title:"Kings and Queens at Cair Paravel",t:.96,loc:"cairparavel",era:"spring",kind:"turning-point",importance:5,chars:["lucy","edmund"],factions:["narnians"],source:"canon",date:"The Golden Age",summary:"At the castle on the eastern sea the four are crowned Kings and Queens — and the long Golden Age of Narnia begins."},
     ],
   },
 };
@@ -823,7 +813,7 @@ const state = {
   universe:"lotr", layer:"me", now:0, playing:false, speed:1,
   selectedEvent:null, selectedChar:null,
   activeChars:new Set(), activeKinds:new Set(["battle","journey","revelation","meeting","loss","turning-point"]),
-  canonOnly:false, cam:{x:.4,y:.4,z:1},
+  canonOnly:false, cam:{x:.5,y:.5,z:1},   // z is set to fitZoom() at boot / on world switch
 };
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 if(reduced) document.body.classList.add("reduced");
@@ -861,7 +851,7 @@ function readURL(){
   state.activeChars=new Set(u.characters.map(c=>c.id));
   if(p.has("chars")) state.activeChars=new Set(p.get("chars").split(",").filter(Boolean));
   if(p.has("cam")){ const [x,y,z]=p.get("cam").split(",").map(Number);
-    if(![x,y,z].some(Number.isNaN)) state.cam={x:clamp(x,0,1),y:clamp(y,0,1),z:clamp(z||1,1,4)}; }  // validate all 3; a bad y/z blanks the map
+    if(![x,y,z].some(Number.isNaN)) state.cam={x:clamp(x,0,1),y:clamp(y,0,1),z:clampZ(z||1)}; }  // validate all 3; a bad y/z blanks the map
 }
 let urlTimer;
 function writeURL(){
@@ -895,7 +885,7 @@ function buildTerrain(){
   // locations live), near (foreground, moves most). See applyCam() for the offset.
   const far=E("g",{class:"tdepth","data-depth":"0.9"}), mid=E("g",{class:"tdepth","data-depth":"1"}), near=E("g",{class:"tdepth","data-depth":"1.1"});
   gTerrain.append(far,mid,near);
-  if(state.universe!=="matrix") graticule(far);          // Matrix has its own grid
+  graticule(far);
   TERRAIN[state.universe]({far,mid,near}, state.layer);
   neatline(near); compass(near, 922, 108, 30);           // map framing + orientation
   // Low-power / reduced-effects tier: strip GPU filters AND the .texfx detail
@@ -991,7 +981,14 @@ function renderEvents(){
 }
 
 /* ---- camera ---- */
-let camAnim=null;
+let camAnim=null, stageW=1280, stageH=620;
+const MAXZ=4;
+function measureStage(){ const r=el("stage").getBoundingClientRect(); if(r.width&&r.height){ stageW=r.width; stageH=r.height; } }
+const sliceK=()=>Math.max(stageW/1000, stageH/700);           // viewBox→screen scale (preserveAspectRatio slice)
+// The zoom that frames the WHOLE 1000×700 map (with a small margin) — the default
+// and the most zoomed-out you can go, so the map + border are always fully visible.
+function fitZoom(){ const k=sliceK(); return clamp(Math.min(stageW/(1000*k), stageH/(700*k))*0.94, 0.25, 1); }
+const clampZ=z=>clamp(z, fitZoom(), MAXZ);
 function applyCam(){
   const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700;
   camG.setAttribute("transform",`translate(${1000/2-cx*z},${700/2-cy*z}) scale(${z})`);
@@ -1006,7 +1003,7 @@ function applyCam(){
 
 /* ---- minimap ---- */
 function renderMinimap(){
-  el("mmLand").setAttribute("d", LAND_PATH || "");                 // land silhouette (empty for Matrix)
+  el("mmLand").setAttribute("d", LAND_PATH || "");                 // land silhouette (empty if a world draws no landmass)
   const dots=el("mmDots"); dots.innerHTML="";
   U().locations.filter(l=>l.layer===state.layer).forEach(l=>{
     const fac=byId(U().factions,l.faction);
@@ -1016,9 +1013,10 @@ function renderMinimap(){
 }
 function updateMinimapViewport(){
   const v=el("mmView"); if(!v) return;
-  const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700;   // visible window in map coords
-  v.setAttribute("x",(cx-500/z).toFixed(1)); v.setAttribute("y",(cy-350/z).toFixed(1));
-  v.setAttribute("width",(1000/z).toFixed(1)); v.setAttribute("height",(700/z).toFixed(1));
+  const z=state.cam.z, k=sliceK(), cx=state.cam.x*1000, cy=state.cam.y*700;  // visible window in map coords
+  const w=stageW/(z*k), h=stageH/(z*k);                          // map units currently on screen
+  v.setAttribute("x",(cx-w/2).toFixed(1)); v.setAttribute("y",(cy-h/2).toFixed(1));
+  v.setAttribute("width",w.toFixed(1)); v.setAttribute("height",h.toFixed(1));
 }
 // click/drag the minimap to recenter the camera
 (function(){
@@ -1037,8 +1035,8 @@ function updateMinimapViewport(){
     const step=.08/state.cam.z;
     const pan={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]}[e.key];
     if(pan){ e.preventDefault(); flyTo(clamp(state.cam.x+pan[0],0,1),clamp(state.cam.y+pan[1],0,1),state.cam.z); }
-    else if(e.key==="+"||e.key==="="){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clamp(state.cam.z*1.4,1,4)); }
-    else if(e.key==="-"){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clamp(state.cam.z/1.4,1,4)); }
+    else if(e.key==="+"||e.key==="="){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clampZ(state.cam.z*1.4)); }
+    else if(e.key==="-"){ e.preventDefault(); flyTo(state.cam.x,state.cam.y,clampZ(state.cam.z/1.4)); }
   });
 })();
 function flyTo(nx,ny,nz,cb){
@@ -1237,7 +1235,7 @@ function buildLayerChips(){
   const grp=el("layerGroup"), box=el("layerChips");
   if(U().layers.length<2){ grp.hidden=true; return; }
   grp.hidden=false; box.innerHTML="";
-  el("layerTitle").textContent = state.universe==="matrix" ? "Reality" : "Layer";
+  el("layerTitle").textContent = "Layer";
   U().layers.forEach(l=>{
     const b=document.createElement("button"); b.className="chip"; b.textContent=l.name;
     b.setAttribute("aria-pressed", l.id===state.layer);
@@ -1261,9 +1259,9 @@ function buildChips(){
   });
 }
 el("canonToggle").querySelector("input").onchange=e=>{ state.canonOnly=e.target.checked; render(); buildTicks(); writeURL(); };
-el("zin").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z*1.4,1,4));
-el("zout").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z/1.4,1,4));
-el("zreset").onclick=()=>flyTo(.4,.4,1);
+el("zin").onclick=()=>flyTo(state.cam.x,state.cam.y,clampZ(state.cam.z*1.4));
+el("zout").onclick=()=>flyTo(state.cam.x,state.cam.y,clampZ(state.cam.z/1.4));
+el("zreset").onclick=()=>flyTo(.5,.5,fitZoom());
 el("renderToggle").onclick=()=>{
   const low=document.body.classList.toggle("low-power");
   el("renderToggle").textContent=low?"2D · low":"2D ✓";
@@ -1317,13 +1315,14 @@ function setUniverse(id, opts={}){
   state.universe=id; state.layer=U().layers[0].id;
   state.selectedEvent=null; state.selectedChar=null;
   state.activeChars=new Set(U().characters.map(c=>c.id));
-  state.canonOnly=false; state.cam={x:.4,y:.4,z:1};
+  state.canonOnly=false; state.cam={x:.5,y:.5,z:fitZoom()};
   el("detail").classList.remove("open");
   applyUniverseChrome();
   buildTerrain(); buildLocations(); buildTicks();
   setNow(state.now,{fromSelect:true}); render();
   searchIdx=buildSearchIndex();
   writeURL();
+  Ambient.switchTo(state.universe);   // crossfade ambient soundscape if audio is on
   if(!opts.boot) toast(`${U().name} — ${U().tagline}`);
 }
 function setLayer(id, opts={}){
@@ -1337,11 +1336,11 @@ function setLayer(id, opts={}){
 /* ---- pan & zoom ---- */
 let dragging=false,dragStart=null;
 mapEl.addEventListener("pointerdown",e=>{ dragging=true; dragStart={x:e.clientX,y:e.clientY,cx:state.cam.x,cy:state.cam.y}; mapEl.setPointerCapture(e.pointerId); });
-mapEl.addEventListener("pointermove",e=>{ if(!dragging)return; const rect=mapEl.getBoundingClientRect();
-  state.cam.x=clamp(dragStart.cx-(e.clientX-dragStart.x)/rect.width/state.cam.z,0,1);
-  state.cam.y=clamp(dragStart.cy-(e.clientY-dragStart.y)/rect.height/state.cam.z,0,1); applyCam(); });
+mapEl.addEventListener("pointermove",e=>{ if(!dragging)return; const sc=sliceK()*state.cam.z;  // map units per screen px
+  state.cam.x=clamp(dragStart.cx-(e.clientX-dragStart.x)/(1000*sc),0,1);
+  state.cam.y=clamp(dragStart.cy-(e.clientY-dragStart.y)/(700*sc),0,1); applyCam(); });
 mapEl.addEventListener("pointerup",()=>{ if(dragging){ dragging=false; writeURL(); }});
-mapEl.addEventListener("wheel",e=>{ e.preventDefault(); state.cam.z=clamp(state.cam.z*(e.deltaY<0?1.12:.89),1,4); applyCam(); writeURL(); },{passive:false});
+mapEl.addEventListener("wheel",e=>{ e.preventDefault(); state.cam.z=clampZ(state.cam.z*(e.deltaY<0?1.12:.89)); applyCam(); writeURL(); },{passive:false});
 
 /* ---- search ---- */
 const searchInput=el("searchInput"), searchResults=el("searchResults");
@@ -1396,12 +1395,60 @@ let toastTimer;
 function toast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2600); }
 
 /* =====================================================================
+   AMBIENT AUDIO — procedural Web Audio soundscape per world (no asset files,
+   preserves the zero-dependency single-file design). A drone of detuned
+   partials through a slow-swept lowpass + soft filtered-noise wind. Off by
+   default; created lazily on the first click (the required user gesture).
+   ===================================================================== */
+const Ambient=(function(){
+  let ctx=null, master=null, nodes=[], on=false, stopTimer=null;
+  const SPECS={   // tonal character per world: base freq + partial ratios + filter
+    lotr:  {base:55,   type:"sine",     partials:[1,1.5,2],      cut:420, lfo:0.06, wind:0.9,  wcut:600},   // A1 open fifth — somber, epic
+    hp:    {base:65.4, type:"triangle", partials:[1,1.2,1.5,2],  cut:520, lfo:0.09, wind:0.7,  wcut:950},   // C2 minor — mysterious
+    narnia:{base:73.4, type:"sine",     partials:[1,1.25,1.5,2], cut:660, lfo:0.11, wind:0.8,  wcut:1250},  // D2 major — bright, wintry
+  };
+  function noiseBuf(){ const b=ctx.createBuffer(1,ctx.sampleRate*2,ctx.sampleRate), d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; return b; }
+  function stopNodes(){ nodes.forEach(n=>{ try{ n.stop&&n.stop(); }catch(e){} try{ n.disconnect&&n.disconnect(); }catch(e){} }); nodes=[]; }
+  function build(u){
+    stopNodes(); const s=SPECS[u]||SPECS.lotr, t=ctx.currentTime;
+    const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=s.cut; lp.Q.value=5; lp.connect(master);
+    const lfo=ctx.createOscillator(); lfo.frequency.value=s.lfo; const lg=ctx.createGain(); lg.gain.value=s.cut*0.4; lfo.connect(lg); lg.connect(lp.frequency); lfo.start(); nodes.push(lfo,lg,lp);
+    s.partials.forEach((p,i)=>{ const o=ctx.createOscillator(); o.type=s.type; o.frequency.value=s.base*p; o.detune.value=(i-1)*7;
+      const g=ctx.createGain(); g.gain.value=0.14/s.partials.length*(i?0.75:1); o.connect(g); g.connect(lp); o.start(); nodes.push(o,g); });
+    const src=ctx.createBufferSource(); src.buffer=noiseBuf(); src.loop=true;
+    const wf=ctx.createBiquadFilter(); wf.type="bandpass"; wf.frequency.value=s.wcut; wf.Q.value=0.6;
+    const wg=ctx.createGain(); wg.gain.value=s.wind*0.045; src.connect(wf); wf.connect(wg); wg.connect(master); src.start(); nodes.push(src,wf,wg);
+  }
+  function ramp(to,dur){ const t=ctx.currentTime; master.gain.cancelScheduledValues(t); master.gain.setValueAtTime(master.gain.value,t); master.gain.linearRampToValueAtTime(to,t+dur); }
+  function start(u){ if(stopTimer){ clearTimeout(stopTimer); stopTimer=null; }   // cancel a pending teardown from a just-issued stop()
+    if(!ctx){ const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return false; ctx=new AC(); master=ctx.createGain(); master.gain.value=0; master.connect(ctx.destination); }
+    if(ctx.resume) ctx.resume(); build(u); on=true; ramp(0.1,1.6); return true; }
+  function stop(){ if(!ctx) return; on=false; ramp(0,0.7); stopTimer=setTimeout(()=>{ if(!on) stopNodes(); },800); }
+  return {
+    toggle(u){ on?stop():start(u); return on; },
+    isOn:()=>on,
+    switchTo(u){ if(!on||!ctx) return; ramp(0,0.5); setTimeout(()=>{ if(on){ build(u); ramp(0.1,1.0); } },520); },
+  };
+})();
+el("audioToggle").onclick=()=>{
+  const now=Ambient.toggle(state.universe);
+  el("audioToggle").textContent=now?"♪ on":"♪ off";
+  el("audioToggle").setAttribute("aria-pressed",now?"true":"false");
+  toast(now?`Ambient sound on — ${U().name}`:"Ambient sound off");
+};
+
+/* =====================================================================
    BOOT
    ===================================================================== */
 function render(){ renderRoutes(); renderEvents(); markTicks(); applyCam(); }
+// Keep the framed view sane across viewport changes (re-measure, never zoom past fit).
+addEventListener("resize",()=>{ measureStage(); state.cam.z=clampZ(state.cam.z); applyCam(); });
 function boot(){
-  const hadT=new URLSearchParams(location.search).has("t");
+  const params=new URLSearchParams(location.search);
+  const hadT=params.has("t"), hadCam=params.has("cam");
+  measureStage();
   readURL();
+  if(!hadCam) state.cam={x:.5,y:.5,z:fitZoom()};   // default: frame the whole map with a margin
   applyUniverseChrome();
   searchIdx=buildSearchIndex();
   buildTerrain(); buildLocations(); buildTicks();

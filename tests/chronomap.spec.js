@@ -97,6 +97,29 @@ test.describe("event-label de-collision", () => {
   });
 });
 
+test.describe("ambient audio", () => {
+  test("toggle turns ambient on/off without errors and reflects state", async ({ page }) => {
+    const errors = await open(page, "?u=narnia");
+    const btn = page.locator("#audioToggle");
+    await expect(btn).toHaveAttribute("aria-pressed", "false");
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-pressed", "true");
+    await expect(btn).toContainText("on");
+    // an AudioContext should now exist and be running/suspended (created on the gesture)
+    const hasCtx = await page.evaluate(() => typeof (window.AudioContext || window.webkitAudioContext) === "function");
+    expect(hasCtx).toBe(true);
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-pressed", "false");
+    // rapid off→on re-toggle must not let the deferred teardown kill the restarted audio
+    await btn.click(); // on
+    await page.waitForTimeout(1000); // outlive the 800ms stop-teardown timer
+    await expect(btn).toHaveAttribute("aria-pressed", "true");
+    const running = await page.evaluate(() => document.getElementById("audioToggle").getAttribute("aria-pressed") === "true");
+    expect(running).toBe(true);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("boot & health", () => {
   test("boots with no console/page errors and correct title", async ({ page }) => {
     const errors = await open(page);
@@ -122,10 +145,11 @@ test.describe("universe switching", () => {
     await expect(page.getByRole("button", { name: "Wizarding Britain" })).toHaveAttribute("aria-current", "true");
   });
 
-  test("Matrix exposes its two reality layers", async ({ page }) => {
-    await open(page, "?u=matrix");
-    await expect(page.locator("#layerGroup")).toBeVisible();
-    await expect(page.locator("#layerChips button")).toHaveCount(2);
+  test("Narnia loads with its own theme and single layer", async ({ page }) => {
+    await open(page, "?u=narnia");
+    await expect(page.locator("#tagline")).toContainText("Lion");
+    await expect(page.locator("#layerGroup")).toBeHidden(); // single-layer world → no layer chips
+    await expect(page.getByRole("button", { name: "Narnia" })).toHaveAttribute("aria-current", "true");
   });
 });
 
@@ -217,11 +241,11 @@ test.describe("robust URL handling", () => {
     expect(transform).not.toContain("NaN");
   });
 
-  test("deep-link restores universe, layer, and opens the event panel", async ({ page }) => {
-    await open(page, "?u=matrix&layer=real&event=e_wake");
+  test("deep-link restores universe and opens the event panel", async ({ page }) => {
+    await open(page, "?u=narnia&event=e_table");
     await expect(page.locator("#detail")).toHaveClass(/open/);
-    await expect(page.locator("#dTitle")).toContainText("Pod");
-    await expect(page.locator("#layerChips button", { hasText: "Real World" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#dTitle")).toContainText("Stone Table");
+    await expect(page.getByRole("button", { name: "Narnia" })).toHaveAttribute("aria-current", "true");
     // a boot-time deep link must NOT steal focus before the user interacts
     await expect(page.locator("#dClose")).not.toBeFocused();
   });
@@ -231,7 +255,7 @@ test.describe("expanded cast (2+ extra characters per universe)", () => {
   for (const [u, expected] of [
     ["lotr", ["Gandalf", "Samwise Gamgee"]],
     ["hp", ["Hermione Granger", "Severus Snape"]],
-    ["matrix", ["Morpheus", "Agent Smith"]],
+    ["narnia", ["Aslan", "The White Witch"]],
   ]) {
     test(`${u} has 4 characters incl. the new pair`, async ({ page }) => {
       await open(page, `?u=${u}`);
@@ -333,8 +357,8 @@ test.describe("map cartouche & ambient shimmer", () => {
     await expect(page.locator("#terrain text", { hasText: "Middle-earth" })).toBeVisible();
     await open(page, "?u=hp");
     await expect(page.locator("#terrain text", { hasText: "Wizarding Britain" })).toBeVisible();
-    await open(page, "?u=matrix");
-    await expect(page.locator("#terrain text", { hasText: "The Simulation" })).toBeVisible();
+    await open(page, "?u=narnia");
+    await expect(page.locator("#terrain text", { hasText: "THE LION, THE WITCH" })).toBeVisible();
   });
 
   test("ambient water shimmer animates on the capable tier, gone in low-power", async ({ page }) => {
