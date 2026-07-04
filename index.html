@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Chronomap — Fictional Universes Timeline Map</title>
+<meta name="description" content="Interactive timeline-map across three fictional universes: Middle-earth, Wizarding Britain, and The Matrix. Non-WebGL 2D tier." />
+<style>
+  /* ============================================================
+     Chronomap — data-driven multi-universe engine, 2D (SVG) tier.
+     One product shell, three worlds. Everything visual is driven by
+     per-universe theme tokens (applied to :root at runtime) so a world
+     swap is a token swap, not a layout change. Zero dependencies.
+
+     Separation rule (see DESIGN.md §2.4):
+       universe            -> separate map (own layers[], theme, timeline)
+       book vs film        -> SAME map, `source` tag + canon toggle
+       in-world alt space  -> separate MapLayer within the universe
+                              (Matrix simulation vs. real world)
+     ============================================================ */
+  :root {
+    /* Base tokens — overwritten per-universe by applyTheme() in JS. */
+    --u-text:#241a10; --u-panel:#e9ddc2; --u-panel-2:#ded0ad;
+    --u-primary:#b8863b; --u-primary-ink:#241a10; --u-secondary:#7d5a24;
+    --u-danger:#7c2d2d; --u-forest:#4c6141; --u-water:#6f8ba0; --u-line:#5b4a2f;
+    --u-chip-bg:rgba(255,255,255,.35); --u-track:rgba(184,134,59,.28);
+    --u-playhead:#fff; --u-label-halo:rgba(233,221,194,.9);
+    --u-map-1:#efe4c8; --u-map-2:#d8c69c;
+    --u-body-1:#f3ead2; --u-body-2a:#e7dabc; --u-body-2b:#d8c69c;
+    --u-header-bg:#241a10; --u-header-text:#e9ddc2; --u-footer-bg:#1c140c; --u-footer-text:#e9ddc2;
+    --u-land:#d9c99e; --u-land-stroke:#a9905f;
+    --font-serif:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    --font-ui:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --shadow:0 10px 40px -12px rgba(0,0,0,.55);
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body {
+    font-family:var(--font-ui); color:var(--u-text); overflow:hidden;
+    background:
+      radial-gradient(1200px 800px at 70% -10%, var(--u-body-1), transparent),
+      linear-gradient(160deg, var(--u-body-2a), var(--u-body-2b));
+    transition: background .6s ease, color .6s ease;
+  }
+  .app { display:grid; grid-template-rows:auto 1fr auto; height:100dvh; }
+
+  header.topbar {
+    display:flex; align-items:center; gap:14px; padding:10px 16px;
+    background:var(--u-header-bg); color:var(--u-header-text);
+    border-bottom:1px solid var(--u-secondary); z-index:30; transition:background .6s;
+  }
+  .brand { display:flex; align-items:baseline; gap:10px; }
+  .brand b { font-family:var(--font-serif); font-size:19px; letter-spacing:.3px; color:var(--u-primary); }
+  .brand span { font-size:12px; opacity:.72; }
+  .universe-switch { display:flex; gap:6px; margin-left:6px; }
+  .universe-switch button {
+    font:inherit; font-size:12px; padding:5px 11px; border-radius:999px;
+    border:1px solid var(--u-secondary); background:transparent; color:var(--u-header-text);
+    cursor:pointer; transition:.2s;
+  }
+  .universe-switch button[aria-current="true"] { background:var(--u-primary); color:var(--u-primary-ink); border-color:var(--u-primary); }
+  .search { margin-left:auto; position:relative; }
+  .search input {
+    font:inherit; font-size:13px; width:210px; max-width:40vw; padding:7px 11px 7px 30px;
+    border-radius:8px; border:1px solid var(--u-secondary); background:rgba(127,127,127,.12); color:var(--u-header-text);
+  }
+  .search input::placeholder { color:var(--u-header-text); opacity:.5; }
+  .search svg { position:absolute; left:9px; top:8px; opacity:.6; }
+  .search-results {
+    position:absolute; top:40px; left:0; right:0; background:var(--u-panel); color:var(--u-text);
+    border-radius:8px; box-shadow:var(--shadow); overflow:hidden auto; display:none; z-index:40; max-height:320px;
+  }
+  .search-results.open { display:block; }
+  .search-results button { display:block; width:100%; text-align:left; font:inherit; font-size:13px; padding:9px 12px; border:0; background:none; cursor:pointer; border-bottom:1px solid rgba(127,127,127,.15); color:inherit; }
+  .search-results button:hover { background:var(--u-panel-2); }
+  .search-results small { opacity:.6; }
+
+  .stage { position:relative; overflow:hidden; }
+  svg.map { position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+
+  .controls {
+    position:absolute; top:12px; left:12px; z-index:10; width:232px; padding:10px 12px;
+    background:color-mix(in srgb, var(--u-panel) 92%, transparent); border:1px solid var(--u-secondary);
+    border-radius:12px; box-shadow:var(--shadow); backdrop-filter:blur(2px); color:var(--u-text);
+    max-height:calc(100dvh - 200px); overflow:auto;
+  }
+  .controls h3 { margin:0 0 6px; font-family:var(--font-serif); font-size:13px; letter-spacing:.4px; text-transform:uppercase; color:var(--u-secondary); }
+  .controls .group + .group { margin-top:10px; padding-top:10px; border-top:1px dashed color-mix(in srgb, var(--u-line) 45%, transparent); }
+  .chip {
+    display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; padding:4px 8px; margin:2px 3px 2px 0;
+    border-radius:999px; border:1px solid var(--u-line); background:var(--u-chip-bg); user-select:none; color:var(--u-text);
+  }
+  .chip input { display:none; }
+  .chip .dot { width:9px; height:9px; border-radius:50%; }
+  .chip[data-on="false"] { opacity:.4; text-decoration:line-through; }
+  .chip[aria-pressed="true"] { background:var(--u-primary); color:var(--u-primary-ink); border-color:var(--u-primary); }
+  .legend-row { display:flex; align-items:center; gap:8px; font-size:12px; margin:3px 0; }
+  .legend-swatch { width:24px; height:0; border-top-width:2px; border-top-style:solid; }
+  .legend-swatch.dashed { border-top-style:dashed; }
+  .mini { font-size:11px; opacity:.7; line-height:1.35; }
+
+  .zoombar { position:absolute; right:12px; top:12px; z-index:10; display:flex; flex-direction:column; gap:6px; }
+  .zoombar button, .render-toggle {
+    font:inherit; width:36px; height:36px; border-radius:9px; border:1px solid var(--u-secondary);
+    background:color-mix(in srgb, var(--u-panel) 92%, transparent); color:var(--u-text); cursor:pointer; font-size:18px; box-shadow:var(--shadow);
+  }
+  .render-toggle { width:auto; height:auto; font-size:11px; padding:6px 9px; }
+
+  aside.detail {
+    position:absolute; top:0; right:0; height:100%; width:360px; max-width:92vw;
+    background:linear-gradient(180deg, var(--u-panel), var(--u-panel-2));
+    border-left:2px solid var(--u-secondary); box-shadow:var(--shadow); color:var(--u-text);
+    transform:translateX(100%); transition:transform .42s cubic-bezier(.2,.8,.2,1); z-index:20; display:flex; flex-direction:column;
+  }
+  aside.detail.open { transform:translateX(0); }
+  .reduced aside.detail { transition:none; }
+  .detail header { display:flex; align-items:flex-start; gap:10px; padding:16px 16px 10px; border-bottom:1px solid color-mix(in srgb, var(--u-line) 40%, transparent); }
+  .detail header .kind { font-size:10px; text-transform:uppercase; letter-spacing:.8px; padding:3px 7px; border-radius:6px; background:var(--u-header-bg); color:var(--u-primary); align-self:center; }
+  .detail h2 { font-family:var(--font-serif); margin:0; font-size:20px; line-height:1.15; }
+  .detail .when { font-size:12px; opacity:.78; margin-top:2px; }
+  .detail .body { padding:14px 16px; overflow-y:auto; font-size:14px; line-height:1.5; }
+  .detail .close { margin-left:auto; background:none; border:0; font-size:22px; cursor:pointer; color:var(--u-secondary); line-height:1; }
+  .badge { display:inline-block; font-size:10px; padding:2px 7px; border-radius:999px; letter-spacing:.4px; }
+  .badge.canon { background:color-mix(in srgb, var(--u-forest) 20%, transparent); color:var(--u-forest); border:1px solid var(--u-forest); }
+  .badge.interpretation, .badge.adaptation { background:color-mix(in srgb, var(--u-danger) 15%, transparent); color:var(--u-danger); border:1px dashed var(--u-danger); }
+  .link-list { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 14px; }
+  .link-list button { font:inherit; font-size:12px; padding:5px 10px; border-radius:999px; cursor:pointer; border:1px solid var(--u-line); background:var(--u-chip-bg); color:var(--u-text); }
+  .link-list button:hover { background:var(--u-primary); color:var(--u-primary-ink); border-color:var(--u-primary); }
+  .section-label { font-family:var(--font-serif); font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--u-secondary); margin:10px 0 4px; }
+
+  footer.timeline { background:var(--u-footer-bg); color:var(--u-footer-text); padding:10px 18px 14px; border-top:1px solid var(--u-secondary); z-index:25; transition:background .6s; }
+  .tl-head { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+  .play { width:40px; height:40px; border-radius:50%; border:1px solid var(--u-primary); background:var(--u-primary); color:var(--u-primary-ink); font-size:15px; cursor:pointer; flex:0 0 auto; display:grid; place-items:center; }
+  .tl-now { font-family:var(--font-serif); font-size:15px; }
+  .tl-now small { display:block; font-family:var(--font-ui); font-size:11px; opacity:.7; }
+  .tl-era { margin-left:auto; font-size:12px; opacity:.85; text-align:right; max-width:40%; }
+  .speed { font-size:11px; opacity:.8; }
+  .speed button { font:inherit; background:none; border:1px solid var(--u-secondary); color:var(--u-footer-text); border-radius:6px; padding:2px 6px; cursor:pointer; }
+
+  .track-wrap { position:relative; padding:14px 4px 4px; }
+  .track { position:relative; height:4px; background:var(--u-track); border-radius:4px; z-index:2; }
+  .track .fill { position:absolute; left:0; top:0; height:100%; background:var(--u-primary); border-radius:4px; width:0; }
+  .track .tick { position:absolute; top:-7px; width:12px; height:12px; margin-left:-6px; border-radius:50%; background:var(--u-panel); border:2px solid var(--u-secondary); cursor:pointer; transition:transform .15s; pointer-events:auto; }
+  .track .tick.interpretation, .track .tick.adaptation { border-style:dashed; background:transparent; }
+  .track .tick[data-passed="true"] { background:var(--u-primary); }
+  .track .tick.sel { transform:scale(1.5); box-shadow:0 0 0 4px color-mix(in srgb, var(--u-primary) 30%, transparent); }
+  .track .tick:hover { transform:scale(1.4); }
+  .playhead { position:absolute; top:-10px; width:3px; height:24px; background:var(--u-playhead); margin-left:-1.5px; pointer-events:none; box-shadow:0 0 8px color-mix(in srgb, var(--u-playhead) 60%, transparent); }
+  input.scrub { position:absolute; inset:-8px 0 0; width:100%; height:24px; opacity:0; cursor:pointer; margin:0; z-index:1; }
+  .tl-axis { display:flex; justify-content:space-between; font-size:11px; opacity:.6; margin-top:8px; gap:12px; }
+  .tl-tip { position:absolute; bottom:34px; transform:translateX(-50%); background:var(--u-panel); color:var(--u-text); font-size:11px; padding:4px 8px; border-radius:6px; white-space:nowrap; pointer-events:none; display:none; box-shadow:var(--shadow); }
+
+  .loc-label { font-family:var(--font-serif); font-size:12px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
+  .evt-label { font-family:var(--font-ui); font-size:11px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
+
+  .toast { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); background:var(--u-header-bg); color:var(--u-primary); font-size:12px; padding:8px 14px; border-radius:999px; box-shadow:var(--shadow); z-index:50; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .toast.show { opacity:1; }
+
+  [hidden] { display:none !important; }
+  @media (max-width:760px) {
+    .controls { width:200px; transform:scale(.92); transform-origin:top left; }
+    .brand span { display:none; }
+    .tl-era { display:none; }
+    aside.detail { width:100%; }
+  }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <div class="brand"><b>Chronomap</b><span id="tagline">The War of the Ring</span></div>
+    <nav class="universe-switch" aria-label="Universe" id="universeSwitch"></nav>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <input id="searchInput" type="text" placeholder="Search events, places, people…" autocomplete="off" aria-label="Search" />
+      <div class="search-results" id="searchResults" role="listbox"></div>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    <svg class="map" id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Map">
+      <defs>
+        <radialGradient id="mapbg" cx="45%" cy="35%" r="80%">
+          <stop offset="0%" style="stop-color:var(--u-map-1)"/><stop offset="100%" style="stop-color:var(--u-map-2)"/>
+        </radialGradient>
+        <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="6"/></filter>
+        <linearGradient id="dangerG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" style="stop-color:var(--u-danger)"/><stop offset="100%" style="stop-color:#111"/></linearGradient>
+      </defs>
+      <g id="cam">
+        <rect x="-200" y="-200" width="1400" height="1100" fill="url(#mapbg)"/>
+        <g id="terrain"></g>
+        <g id="routes"></g>
+        <g id="locations"></g>
+        <g id="events"></g>
+      </g>
+    </svg>
+
+    <div class="controls" role="group" aria-label="Layers and filters">
+      <div class="group" id="layerGroup" hidden>
+        <h3 id="layerTitle">Reality</h3>
+        <div id="layerChips"></div>
+      </div>
+      <div class="group">
+        <h3>Journeys</h3>
+        <div id="charChips"></div>
+      </div>
+      <div class="group">
+        <h3>Event types</h3>
+        <div id="kindChips"></div>
+      </div>
+      <div class="group">
+        <h3>Legend</h3>
+        <div class="legend-row"><span class="legend-swatch" style="border-color:var(--u-primary)"></span> Canon (documented)</div>
+        <div class="legend-row"><span class="legend-swatch dashed" style="border-color:var(--u-danger)"></span> Interpretation / adaptation</div>
+        <label class="chip" style="margin-top:6px" id="canonToggle"><input type="checkbox"/> Canon only</label>
+        <p class="mini" id="mapNote">Geography is stylized &amp; interpretive — relative topology, not real coordinates.</p>
+      </div>
+    </div>
+
+    <div class="zoombar">
+      <button id="zin" aria-label="Zoom in">＋</button>
+      <button id="zout" aria-label="Zoom out">－</button>
+      <button id="zreset" aria-label="Reset view" title="Reset view">⟳</button>
+      <button class="render-toggle" id="renderToggle" title="Simulate no-WebGL / low-power">2D ✓</button>
+    </div>
+
+    <aside class="detail" id="detail" aria-live="polite">
+      <header>
+        <span class="kind" id="dKind">—</span>
+        <div><h2 id="dTitle">—</h2><div class="when" id="dWhen"></div></div>
+        <button class="close" id="dClose" aria-label="Close panel">×</button>
+      </header>
+      <div class="body" id="dBody"></div>
+    </aside>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <footer class="timeline">
+    <div class="tl-head">
+      <button class="play" id="play" aria-label="Play timeline">▶</button>
+      <div class="tl-now"><span id="nowDate">—</span><small id="nowYear"></small></div>
+      <div class="speed">speed <button id="speed">1×</button></div>
+      <div class="tl-era" id="eraLabel"></div>
+    </div>
+    <div class="track-wrap">
+      <div class="tl-tip" id="tlTip"></div>
+      <div class="track" id="track"><div class="fill" id="fill"></div><div class="playhead" id="playhead"></div></div>
+      <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" aria-label="Timeline scrubber" />
+      <div class="tl-axis"><span id="axisFrom"></span><span id="axisTo"></span></div>
+    </div>
+  </footer>
+</div>
+
+<script>
+/* =====================================================================
+   THEMES — per-universe token sets. applyTheme() writes them to :root.
+   ===================================================================== */
+const SERIF = '"Iowan Old Style","Palatino Linotype",Georgia,serif';
+const UI = 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+const MONO = '"JetBrains Mono","IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace';
+const THEMES = {
+  lotr: { text:"#241a10", panel:"#e9ddc2", panel2:"#ded0ad", primary:"#b8863b", primaryInk:"#241a10",
+    secondary:"#7d5a24", danger:"#7c2d2d", forest:"#4c6141", water:"#6f8ba0", line:"#5b4a2f",
+    chipBg:"rgba(255,255,255,.35)", track:"rgba(184,134,59,.28)", playhead:"#ffffff", labelHalo:"rgba(233,221,194,.9)",
+    map1:"#efe4c8", map2:"#d8c69c", body1:"#f3ead2", body2a:"#e7dabc", body2b:"#d8c69c",
+    headerBg:"#241a10", headerText:"#e9ddc2", footerBg:"#1c140c", footerText:"#e9ddc2",
+    land:"#d9c99e", landStroke:"#a9905f", serif:SERIF, ui:UI },
+  hp: { text:"#2a1a3e", panel:"#f2e9d8", panel2:"#e6dbc2", primary:"#8b2635", primaryInk:"#f7efe0",
+    secondary:"#6b4a7a", danger:"#8b2635", forest:"#3f6d4a", water:"#4a6a8a", line:"#5a4a6a",
+    chipBg:"rgba(255,255,255,.4)", track:"rgba(139,38,53,.25)", playhead:"#f2e9d8", labelHalo:"rgba(242,233,216,.92)",
+    map1:"#efe6d2", map2:"#d7c9ac", body1:"#f2ead6", body2a:"#e4dcc6", body2b:"#d0c3a8",
+    headerBg:"#241033", headerText:"#f2e9d8", footerBg:"#1a0c28", footerText:"#f2e9d8",
+    land:"#ded2b3", landStroke:"#a99a6f", serif:SERIF, ui:UI },
+  matrix: { text:"#bdf5d0", panel:"#0c150e", panel2:"#0f1b12", primary:"#22c55e", primaryInk:"#04150a",
+    secondary:"#1f7a45", danger:"#f0466a", forest:"#22c55e", water:"#67e8f9", line:"#1f7a45",
+    chipBg:"rgba(34,197,94,.08)", track:"rgba(34,197,94,.2)", playhead:"#eafff2", labelHalo:"rgba(3,8,4,.9)",
+    map1:"#08120a", map2:"#040705", body1:"#06110a", body2a:"#050b06", body2b:"#020402",
+    headerBg:"#04100a", headerText:"#bdf5d0", footerBg:"#040b06", footerText:"#bdf5d0",
+    land:"#0a1a0e", landStroke:"#1f7a45", serif:MONO, ui:MONO },
+};
+function applyTheme(id){
+  const t=THEMES[id], r=document.documentElement.style, m={
+    "--u-text":t.text,"--u-panel":t.panel,"--u-panel-2":t.panel2,"--u-primary":t.primary,"--u-primary-ink":t.primaryInk,
+    "--u-secondary":t.secondary,"--u-danger":t.danger,"--u-forest":t.forest,"--u-water":t.water,"--u-line":t.line,
+    "--u-chip-bg":t.chipBg,"--u-track":t.track,"--u-playhead":t.playhead,"--u-label-halo":t.labelHalo,
+    "--u-map-1":t.map1,"--u-map-2":t.map2,"--u-body-1":t.body1,"--u-body-2a":t.body2a,"--u-body-2b":t.body2b,
+    "--u-header-bg":t.headerBg,"--u-header-text":t.headerText,"--u-footer-bg":t.footerBg,"--u-footer-text":t.footerText,
+    "--u-land":t.land,"--u-land-stroke":t.landStroke,"--font-serif":t.serif,"--font-ui":t.ui,
+  };
+  for(const k in m) r.setProperty(k,m[k]);
+}
+
+/* =====================================================================
+   TERRAIN — original stylized art per universe/layer (no licensed maps).
+   ===================================================================== */
+const NS="http://www.w3.org/2000/svg";
+function E(tag,attrs){ const e=document.createElementNS(NS,tag); for(const k in attrs) e.setAttribute(k,attrs[k]); return e; }
+function rng(seed){ let s=seed; return ()=> (s=(s*9301+49297)%233280)/233280; }
+
+const TERRAIN = {
+  lotr(g){
+    g.appendChild(E("path",{d:"M70,120 C 200,60 380,80 520,110 C 700,140 860,180 900,300 C 940,420 880,560 720,600 C 520,650 300,640 180,560 C 60,480 40,300 70,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
+    g.appendChild(E("path",{d:"M470,150 C 520,240 540,330 560,400 C 580,470 590,520 600,560", fill:"none", stroke:"var(--u-water)", "stroke-width":4, opacity:.55}));
+    const r=rng(7);
+    [[490,285,26],[660,415,22],[300,300,18]].forEach(([cx,cy,rad])=>{ for(let i=0;i<40;i++){ const a=r()*6.28,d=Math.sqrt(r())*rad; g.appendChild(E("circle",{cx:cx+Math.cos(a)*d, cy:cy+Math.sin(a)*d, r:1.6, fill:"var(--u-forest)", opacity:.5})); } });
+    [[430,240,460,300,7],[720,340,800,420,8],[560,430,720,430,10]].forEach(([x1,y1,x2,y2,n])=>{ for(let i=0;i<n;i++){ const f=i/(n-1),x=x1+(x2-x1)*f,y=y1+(y2-y1)*f; g.appendChild(E("path",{d:`M${x-8},${y+6} L${x},${y-8} L${x+8},${y+6}`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1.6, opacity:.7})); } });
+    g.appendChild(E("path",{d:"M690,330 C 780,320 860,360 870,430 C 875,490 820,520 740,505 C 690,495 670,430 690,330 Z", fill:"url(#dangerG)", opacity:.35}));
+  },
+  hp(g){
+    // Stylized Britain — narrow north (Scotland), wider south (England).
+    g.appendChild(E("path",{d:"M430,120 C 470,110 500,140 505,190 C 510,240 480,270 500,320 C 520,360 560,370 560,420 C 560,470 540,520 500,560 C 450,600 380,600 360,540 C 345,500 380,470 375,430 C 370,390 340,380 350,330 C 360,290 400,290 405,250 C 410,210 400,150 430,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
+    g.appendChild(E("path",{d:"M470,300 C 500,360 520,420 540,520", fill:"none", stroke:"var(--u-water)", "stroke-width":3, opacity:.5}));
+    const r=rng(3); // Forbidden Forest near Hogwarts (470,180)
+    for(let i=0;i<34;i++){ const a=r()*6.28,d=Math.sqrt(r())*30; g.appendChild(E("circle",{cx:462+Math.cos(a)*d, cy:210+Math.sin(a)*d, r:1.7, fill:"var(--u-forest)", opacity:.5})); }
+    // subtle contour hachures on the highlands
+    for(let i=0;i<6;i++){ const y=150+i*10; g.appendChild(E("path",{d:`M${430+i*4},${y} q 20,-6 40,0`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.4})); }
+  },
+  matrix(g, layer){
+    if(layer==="sim"){
+      // green code grid + glowing nodes
+      for(let x=0;x<=1000;x+=50) g.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.12}));
+      for(let y=0;y<=700;y+=50) g.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.12}));
+      const r=rng(11);
+      for(let i=0;i<70;i++){ g.appendChild(E("circle",{cx:r()*1000, cy:r()*700, r:r()*1.6+.4, fill:"var(--u-primary)", opacity:r()*.5+.1})); }
+      // a few vertical "rain" streaks
+      for(let i=0;i<10;i++){ const x=r()*1000, y=r()*500; g.appendChild(E("line",{x1:x,y1:y,x2:x,y2:y+90, stroke:"var(--u-primary)", "stroke-width":1, opacity:.15})); }
+    } else {
+      // real world — dark, tunnels converging on Machine City (820,300)
+      const r=rng(5);
+      for(let i=0;i<7;i++){ const sx=r()*300+80, sy=r()*500+120; g.appendChild(E("path",{d:`M${sx},${sy} Q ${(sx+820)/2},${(sy+300)/2+ (r()*120-60)} 820,300`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.25})); }
+      g.appendChild(E("circle",{cx:820,cy:300,r:60, fill:"none", stroke:"var(--u-danger)", "stroke-width":1, opacity:.3}));
+      g.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.35}));
+      for(let i=0;i<40;i++){ g.appendChild(E("circle",{cx:r()*1000, cy:r()*700, r:.6, fill:"var(--u-water)", opacity:.25})); }
+    }
+  },
+};
+
+/* =====================================================================
+   CONTENT — data-driven registry. Coordinates ABSTRACT (0..1000 × 0..700),
+   interpretive, not geodetic. Dates follow published canon; uncertain /
+   adaptation-only items are tagged. `t ∈ [0,1]` is the scrubber coordinate.
+   ===================================================================== */
+const UNIVERSES = {
+  /* ---------------- MIDDLE-EARTH ---------------- */
+  lotr: {
+    id:"lotr", name:"Middle-earth", tagline:"The War of the Ring · T.A. 3018–3019",
+    timeSub:"Third Age", axisFrom:"23 Sep 3018 — Frodo leaves Bag End", axisTo:"25 Mar 3019 — the Ring unmade",
+    layers:[{id:"me", name:"Middle-earth", kind:"primary"}],
+    dateAnchors:[[0,"23 September, T.A. 3018"],[.05,"6 October, T.A. 3018"],[.10,"25 October, T.A. 3018"],[.22,"25 December, T.A. 3018"],[.30,"15 January, T.A. 3019"],[.45,"26 February, T.A. 3019"],[.52,"4 March, T.A. 3019"],[.62,"13 March, T.A. 3019"],[.66,"15 March, T.A. 3019"],[.82,"25 March, T.A. 3019"],[1,"25 March, T.A. 3019"]],
+    eras:[
+      {id:"flight",name:"Flight to Rivendell",from:0,to:.10,blurb:"From Bag End to the Last Homely House."},
+      {id:"fellowship",name:"The Fellowship",from:.10,to:.45,blurb:"Nine walkers set out; the company breaks at Amon Hen."},
+      {id:"twotowers",name:"The Two Towers",from:.45,to:.66,blurb:"War in Rohan; the burden turns east toward Mordor."},
+      {id:"return",name:"The Return of the King",from:.66,to:1,blurb:"Gondor besieged; the Ring carried to the Fire."},
+    ],
+    factions:[{id:"free",name:"Free Peoples",color:"#4c6141"},{id:"mordor",name:"Mordor",color:"#7c2d2d"},{id:"isengard",name:"Isengard",color:"#6b5b3a"}],
+    locations:[
+      {id:"bagend",name:"Bag End",type:"landmark",layer:"me",x:120,y:210,faction:"free",blurb:"Frodo's home in Hobbiton, the Shire — where the journey begins."},
+      {id:"bree",name:"Bree",type:"city",layer:"me",x:225,y:220,faction:"free",blurb:"A village of Men and Hobbits; the Prancing Pony, and a stranger named Strider."},
+      {id:"weathertop",name:"Weathertop",type:"landmark",layer:"me",x:305,y:190,faction:"free",blurb:"Amon Sûl, where Frodo is wounded by the Witch-king's Morgul blade."},
+      {id:"rivendell",name:"Rivendell",type:"city",layer:"me",x:390,y:165,faction:"free",blurb:"Imladris, house of Elrond, where the Council decides the Ring's fate."},
+      {id:"moria",name:"Moria",type:"fortress",layer:"me",x:455,y:250,faction:"free",blurb:"Khazad-dûm; in its depths Gandalf falls with the Balrog."},
+      {id:"lorien",name:"Lothlórien",type:"region",layer:"me",x:505,y:280,faction:"free",blurb:"The Golden Wood of Galadriel; the Fellowship rests and is re-armed."},
+      {id:"amonhen",name:"Amon Hen",type:"landmark",layer:"me",x:540,y:355,faction:"free",blurb:"The Seat of Seeing above Rauros. Boromir falls; the Fellowship breaks."},
+      {id:"edoras",name:"Edoras",type:"city",layer:"me",x:470,y:430,faction:"free",blurb:"The hall of Meduseld and King Théoden, capital of Rohan."},
+      {id:"helm",name:"Helm's Deep",type:"fortress",layer:"me",x:420,y:452,faction:"free",blurb:"The Hornburg, where Rohan withstands the host of Isengard."},
+      {id:"isengard",name:"Isengard",type:"fortress",layer:"me",x:430,y:352,faction:"isengard",blurb:"Saruman's ring of Orthanc — until the Ents break its walls."},
+      {id:"emynmuil",name:"Emyn Muil",type:"wild",layer:"me",x:590,y:365,faction:"free",blurb:"A maze of stone where Frodo and Sam take Gollum as guide."},
+      {id:"ithilien",name:"Ithilien",type:"region",layer:"me",x:660,y:420,faction:"free",blurb:"Gondor's fair, contested woodland east of the Anduin."},
+      {id:"cirith",name:"Cirith Ungol",type:"fortress",layer:"me",x:735,y:415,faction:"mordor",blurb:"The high pass and Shelob's lair — the secret stair into Mordor."},
+      {id:"minastirith",name:"Minas Tirith",type:"city",layer:"me",x:600,y:440,faction:"free",blurb:"The White City of Gondor, besieged at the Pelennor Fields."},
+      {id:"dunharrow",name:"Dunharrow",type:"landmark",layer:"me",x:505,y:475,faction:"free",blurb:"Refuge below the Dwimorberg; door to the Paths of the Dead."},
+      {id:"pelargir",name:"Pelargir",type:"city",layer:"me",x:590,y:530,faction:"free",blurb:"Haven on the Anduin where Aragorn takes the Corsairs' fleet."},
+      {id:"blackgate",name:"The Black Gate",type:"fortress",layer:"me",x:730,y:355,faction:"mordor",blurb:"The Morannon, where the Host of the West gives battle to draw the Eye."},
+      {id:"mountdoom",name:"Mount Doom",type:"landmark",layer:"me",x:800,y:400,faction:"mordor",blurb:"Orodruin — the one fire that can unmake the Ring."},
+    ],
+    characters:[
+      {id:"frodo",name:"Frodo Baggins",color:"#2f6b8f",role:"Ring-bearer",blurb:"A hobbit of the Shire who bears the One Ring to the Fire."},
+      {id:"aragorn",name:"Aragorn",color:"#c89a4a",role:"Heir of Isildur",blurb:"Strider — Ranger, captain, and the returning King of Gondor."},
+    ],
+    routes:[
+      {id:"r_frodo",characterId:"frodo",layer:"me",waypoints:[["bagend",0],["bree",.03],["weathertop",.05],["rivendell",.10],["moria",.30],["lorien",.33],["amonhen",.45],["emynmuil",.47],["ithilien",.58],["cirith",.62],["mountdoom",.82]]},
+      {id:"r_aragorn",characterId:"aragorn",layer:"me",waypoints:[["rivendell",.10],["moria",.30],["lorien",.33],["amonhen",.45],["edoras",.50],["helm",.52],["isengard",.53],["dunharrow",.57],["pelargir",.63],["minastirith",.66],["blackgate",.80]]},
+    ],
+    events:[
+      {id:"e_leave",title:"Frodo leaves Bag End",t:0,loc:"bagend",era:"flight",kind:"journey",importance:5,chars:["frodo"],factions:["free"],source:"canon",date:"23 September, T.A. 3018",summary:"Frodo, Sam, Merry and Pippin slip out of the Shire, carrying the Ring toward Rivendell."},
+      {id:"e_weather",title:"Ambush at Weathertop",t:.05,loc:"weathertop",era:"flight",kind:"loss",importance:4,chars:["frodo"],factions:["mordor"],source:"canon",date:"6 October, T.A. 3018",summary:"The Witch-king wounds Frodo with a Morgul blade; only Rivendell's healing saves him."},
+      {id:"e_council",title:"The Council of Elrond",t:.10,loc:"rivendell",era:"flight",kind:"meeting",importance:5,chars:["frodo","aragorn"],factions:["free"],source:"canon",date:"25 October, T.A. 3018",summary:"The Free Peoples resolve the Ring must be destroyed. Frodo volunteers; the Fellowship is formed."},
+      {id:"e_moria",title:"The Bridge of Khazad-dûm",t:.30,loc:"moria",era:"fellowship",kind:"loss",importance:5,chars:["frodo","aragorn"],factions:["free"],source:"canon",date:"15 January, T.A. 3019",summary:"Gandalf faces the Balrog — “You shall not pass” — and falls into shadow."},
+      {id:"e_break",title:"The Breaking of the Fellowship",t:.45,loc:"amonhen",era:"fellowship",kind:"turning-point",importance:5,chars:["frodo","aragorn"],factions:["free","isengard"],source:"canon",date:"26 February, T.A. 3019",summary:"Boromir falls defending the hobbits. Frodo and Sam turn east alone; the paths diverge."},
+      {id:"e_helm",title:"The Battle of Helm's Deep",t:.52,loc:"helm",era:"twotowers",kind:"battle",importance:5,chars:["aragorn"],factions:["free","isengard"],source:"canon",date:"3–4 March, T.A. 3019",summary:"Rohan holds the Hornburg through the night until dawn and Gandalf break the siege."},
+      {id:"e_isengard",title:"The Ents take Isengard",t:.53,loc:"isengard",era:"twotowers",kind:"turning-point",importance:4,chars:[],factions:["free","isengard"],source:"canon",date:"3 March, T.A. 3019",summary:"Roused by Merry and Pippin, the Ents flood Isengard and pen Saruman in his tower."},
+      {id:"e_shelob",title:"Shelob's Lair",t:.62,loc:"cirith",era:"twotowers",kind:"loss",importance:4,chars:["frodo"],factions:["mordor"],source:"interpretation",date:"13 March, T.A. 3019",summary:"Gollum leads Frodo into the spider's tunnels. Note: the films move this scene to the third installment — a sequencing change from the book, flagged as interpretation."},
+      {id:"e_paths",title:"The Paths of the Dead",t:.58,loc:"dunharrow",era:"return",kind:"journey",importance:4,chars:["aragorn"],factions:["free"],source:"canon",date:"8 March, T.A. 3019",summary:"Aragorn claims the Oathbreakers, then rides to the sea to seize the Corsair fleet."},
+      {id:"e_pelennor",title:"The Battle of the Pelennor Fields",t:.66,loc:"minastirith",era:"return",kind:"battle",importance:5,chars:["aragorn"],factions:["free","mordor"],source:"canon",date:"15 March, T.A. 3019",summary:"Rohan charges to Gondor's aid; Éowyn and Merry fell the Witch-king; Aragorn arrives under friendly sails."},
+      {id:"e_gate",title:"The Black Gate Opens",t:.80,loc:"blackgate",era:"return",kind:"battle",importance:5,chars:["aragorn"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"The Host of the West offers itself as bait to draw the Eye from a hobbit near the mountain."},
+      {id:"e_doom",title:"The Ring is Unmade",t:.82,loc:"mountdoom",era:"return",kind:"turning-point",importance:5,chars:["frodo"],factions:["free","mordor"],source:"canon",date:"25 March, T.A. 3019",summary:"At the Cracks of Doom the Ring claims Frodo — but Gollum's last hunger destroys them both, and Sauron falls."},
+    ],
+  },
+
+  /* ---------------- WIZARDING BRITAIN ---------------- */
+  hp: {
+    id:"hp", name:"Wizarding Britain", tagline:"Harry's Story · 1991–1998",
+    timeSub:"Hogwarts years", axisFrom:"1991 — the letter arrives", axisTo:"1998 — the Battle of Hogwarts",
+    layers:[{id:"gb", name:"Britain", kind:"primary"}],
+    dateAnchors:[[0,"Summer 1991"],[.05,"1 September 1991"],[.12,"June 1992"],[.26,"1993"],[.40,"1994"],[.50,"1994–95"],[.55,"24 June 1995"],[.66,"June 1996"],[.79,"June 1997"],[.88,"Winter 1997"],[.93,"1998"],[.98,"2 May 1998"],[1,"1998"]],
+    eras:[
+      {id:"stone",name:"The Philosopher's Stone",from:0,to:.14,blurb:"An orphan learns he is a wizard."},
+      {id:"chamber",name:"The Chamber of Secrets",from:.14,to:.28,blurb:"A monster stalks the halls; a diary whispers."},
+      {id:"prisoner",name:"The Prisoner of Azkaban",from:.28,to:.42,blurb:"An innocent man, a true betrayer, and time turned back."},
+      {id:"goblet",name:"The Goblet of Fire",from:.42,to:.56,blurb:"A tournament, a graveyard — and the Dark Lord returns."},
+      {id:"phoenix",name:"The Order of the Phoenix",from:.56,to:.68,blurb:"Denial at the Ministry; the war begins in secret."},
+      {id:"prince",name:"The Half-Blood Prince",from:.68,to:.80,blurb:"Old memories, and a tower under the stars."},
+      {id:"hallows",name:"The Deathly Hallows",from:.80,to:1,blurb:"A hunt across Britain ends where it began — at school."},
+    ],
+    factions:[{id:"order",name:"Order of the Phoenix",color:"#8b2635"},{id:"death",name:"Death Eaters",color:"#3a2a52"},{id:"ministry",name:"Ministry of Magic",color:"#4a6a8a"}],
+    locations:[
+      {id:"privet",name:"Privet Drive",type:"landmark",layer:"gb",x:520,y:560,faction:"order",blurb:"Number Four, Little Whinging, Surrey — the cupboard under the stairs."},
+      {id:"kingscross",name:"King's Cross · 9¾",type:"portal",layer:"gb",x:540,y:520,faction:"order",blurb:"Platform Nine and Three-Quarters, gateway to the Hogwarts Express."},
+      {id:"diagon",name:"Diagon Alley",type:"city",layer:"gb",x:548,y:512,faction:"order",blurb:"The wizarding high street off Charing Cross Road; Ollivanders and Gringotts."},
+      {id:"ministry",name:"Ministry of Magic",type:"fortress",layer:"gb",x:534,y:534,faction:"ministry",blurb:"Underground in Whitehall; the Department of Mysteries lies deepest."},
+      {id:"burrow",name:"The Burrow",type:"landmark",layer:"gb",x:430,y:560,faction:"order",blurb:"The crooked Weasley home near Ottery St Catchpole, Devon."},
+      {id:"godrics",name:"Godric's Hollow",type:"landmark",layer:"gb",x:400,y:540,faction:"order",blurb:"Where the Potters lived and died — and a curse rebounded."},
+      {id:"hogwarts",name:"Hogwarts",type:"city",layer:"gb",x:465,y:200,faction:"order",blurb:"The castle in the Scottish Highlands — unplottable, and home."},
+      {id:"hogsmeade",name:"Hogsmeade",type:"landmark",layer:"gb",x:490,y:210,faction:"order",blurb:"Britain's only all-wizarding village; the Three Broomsticks."},
+      {id:"forestdean",name:"Forest of Dean",type:"wild",layer:"gb",x:430,y:490,faction:"order",blurb:"A wooded refuge where the Horcrux hunters camp — and a silver doe appears."},
+      {id:"malfoy",name:"Malfoy Manor",type:"fortress",layer:"gb",x:470,y:520,faction:"death",blurb:"The Death Eaters' headquarters in Wiltshire."},
+      {id:"hangleton",name:"Little Hangleton",type:"landmark",layer:"gb",x:520,y:420,faction:"death",blurb:"The Riddle graveyard, where Voldemort is reborn in flesh."},
+    ],
+    characters:[
+      {id:"harry",name:"Harry Potter",color:"#8b2635",role:"The Boy Who Lived",blurb:"The orphan marked by a curse he survived, who must end the wizard who cast it."},
+      {id:"voldemort",name:"Lord Voldemort",color:"#6b4a7a",role:"The Dark Lord",blurb:"He split his soul to cheat death; each fragment must be found and destroyed."},
+    ],
+    routes:[
+      {id:"r_harry",characterId:"harry",layer:"gb",waypoints:[["privet",0],["kingscross",.05],["hogwarts",.12],["hogwarts",.50],["hangleton",.55],["ministry",.66],["hogwarts",.79],["godrics",.86],["forestdean",.88],["malfoy",.90],["diagon",.93],["hogwarts",.98]]},
+      {id:"r_voldemort",characterId:"voldemort",layer:"gb",waypoints:[["hangleton",.55],["ministry",.66],["malfoy",.86],["hogwarts",.98]]},
+    ],
+    events:[
+      {id:"e_letter",title:"The Letter Arrives",t:.02,loc:"privet",era:"stone",kind:"revelation",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"Summer 1991",summary:"Hagrid finds Harry: “Yer a wizard.” The door to a hidden world swings open."},
+      {id:"e_platform",title:"Platform Nine and Three-Quarters",t:.05,loc:"kingscross",era:"stone",kind:"journey",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"1 September 1991",summary:"Harry runs at a solid barrier and boards the Hogwarts Express — and meets Ron and Hermione."},
+      {id:"e_stone",title:"The Philosopher's Stone",t:.12,loc:"hogwarts",era:"stone",kind:"turning-point",importance:4,chars:["harry","voldemort"],factions:["order","death"],source:"canon",date:"June 1992",summary:"Beneath the trapdoor, Harry faces the shade of Voldemort clinging to a servant's face."},
+      {id:"e_chamber",title:"The Chamber of Secrets",t:.26,loc:"hogwarts",era:"chamber",kind:"battle",importance:4,chars:["harry"],factions:["death"],source:"canon",date:"1993",summary:"Harry destroys the diary — a Horcrux, though no one yet knows the word — and the basilisk within."},
+      {id:"e_sirius",title:"The Truth About Sirius Black",t:.40,loc:"hogwarts",era:"prisoner",kind:"revelation",importance:3,chars:["harry"],factions:["order"],source:"canon",date:"1994",summary:"The supposed betrayer is innocent; the real traitor has hidden as a rat for twelve years."},
+      {id:"e_tournament",title:"The Triwizard Tournament",t:.50,loc:"hogwarts",era:"goblet",kind:"turning-point",importance:3,chars:["harry"],factions:["order"],source:"canon",date:"1994–95",summary:"Harry is entered against the rules; the final task is a trap with a portkey at its heart."},
+      {id:"e_rebirth",title:"The Return of Voldemort",t:.55,loc:"hangleton",era:"goblet",kind:"turning-point",importance:5,chars:["harry","voldemort"],factions:["death"],source:"canon",date:"24 June 1995",summary:"In the Riddle graveyard the Dark Lord rises again in flesh — and the war is real."},
+      {id:"e_ministry",title:"Battle of the Department of Mysteries",t:.66,loc:"ministry",era:"phoenix",kind:"battle",importance:4,chars:["harry","voldemort"],factions:["order","death","ministry"],source:"canon",date:"June 1996",summary:"The prophecy shatters; Sirius falls through the veil; the Ministry can deny the truth no longer."},
+      {id:"e_tower",title:"The Astronomy Tower",t:.79,loc:"hogwarts",era:"prince",kind:"loss",importance:5,chars:["harry"],factions:["order","death"],source:"canon",date:"June 1997",summary:"Dumbledore falls; Harry is left with a locket, a mission, and the meaning of Horcruxes."},
+      {id:"e_hunt",title:"The Horcrux Hunt",t:.88,loc:"forestdean",era:"hallows",kind:"journey",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"Winter 1997",summary:"On the run across Britain, the three chase the fragments of a soul — a silver doe leads Harry to a sword in the ice."},
+      {id:"e_gringotts",title:"Break-in at Gringotts",t:.93,loc:"diagon",era:"hallows",kind:"turning-point",importance:4,chars:["harry"],factions:["order"],source:"canon",date:"1998",summary:"A Horcrux is wrenched from a vault, and a dragon carries the thieves to freedom over London."},
+      {id:"e_battle",title:"The Battle of Hogwarts",t:.98,loc:"hogwarts",era:"hallows",kind:"battle",importance:5,chars:["harry","voldemort"],factions:["order","death"],source:"canon",date:"2 May 1998",summary:"The school becomes a fortress; the last Horcrux dies, and so, at dawn, does the Dark Lord."},
+      {id:"e_duel",title:"The Final Duel (film staging)",t:.99,loc:"hogwarts",era:"hallows",kind:"turning-point",importance:3,chars:["harry","voldemort"],factions:["order","death"],source:"interpretation",date:"2 May 1998",summary:"The films stage the end as a flying, castle-spanning duel with Voldemort disintegrating into ash — a cinematic invention; in the book he simply falls, mortal at last. Flagged as adaptation."},
+    ],
+  },
+
+  /* ---------------- THE MATRIX ---------------- */
+  matrix: {
+    id:"matrix", name:"The Matrix", tagline:"Neo's Path · simulated ↔ real",
+    timeSub:"In-film chronology", axisFrom:"“The One” is found", axisTo:"The end of the Machine War",
+    note:"Two coupled spaces, one universe. The simulation reads as ~1999 by design; the real-world year is unknown — Morpheus guesses “closer to 2199,” disputed. Toggle the reality layer to switch spaces.",
+    layers:[{id:"sim", name:"Simulation", kind:"primary"},{id:"real", name:"Real World", kind:"alternate"}],
+    dateAnchors:[[0,"Sim: ~1999"],[.10,"Real: ~2199 (disputed)"],[.25,"Sim: ~1999"],[.40,"Reloaded"],[.55,"Reloaded"],[.72,"Revolutions"],[.90,"Revolutions"],[1,"The truce"]],
+    eras:[
+      {id:"awaken",name:"Awakening",from:0,to:.40,blurb:"A hacker is offered a choice between two pills."},
+      {id:"one",name:"The One Confirmed",from:.40,to:.72,blurb:"Purpose, prophecy, and the Architect's arithmetic."},
+      {id:"end",name:"The End of the War",from:.72,to:1,blurb:"Zion holds; a bargain is struck at the Machine City."},
+    ],
+    factions:[{id:"crew",name:"Neb Crew / Zion",color:"#22c55e"},{id:"agents",name:"Agents / Machines",color:"#f0466a"},{id:"exiles",name:"Exile Programs",color:"#67e8f9"}],
+    locations:[
+      // simulation layer
+      {id:"hotel",name:"Heart O' the City Hotel",type:"landmark",layer:"sim",x:300,y:250,faction:"crew",blurb:"Room 303 — where Trinity is cornered, and where the red pill is offered."},
+      {id:"metacortex",name:"MetaCortex",type:"city",layer:"sim",x:520,y:300,faction:"agents",blurb:"Thomas Anderson's software job — and the ledge he refuses to climb."},
+      {id:"oracle",name:"The Oracle",type:"landmark",layer:"sim",x:400,y:460,faction:"crew",blurb:"A kindly program in a kitchen, baking cookies and truths."},
+      {id:"govt",name:"Government Lobby",type:"fortress",layer:"sim",x:300,y:360,faction:"agents",blurb:"Guns. Lots of guns. The rescue of Morpheus begins here."},
+      {id:"freeway",name:"The Freeway",type:"wild",layer:"sim",x:560,y:500,faction:"exiles",blurb:"Fourteen miles of chase for the Keymaker — “nobody comes back.”"},
+      {id:"source",name:"The Source",type:"portal",layer:"sim",x:700,y:160,faction:"agents",blurb:"The Architect's white room, where the One's true purpose is revealed."},
+      // real layer
+      {id:"pod",name:"The Power Plant",type:"landmark",layer:"real",x:600,y:200,faction:"agents",blurb:"A field of pods; Neo wakes, unplugged, and is flushed into the real."},
+      {id:"neb",name:"The Nebuchadnezzar",type:"vessel",layer:"real",x:360,y:300,faction:"crew",blurb:"Morpheus's hovercraft — home, training deck, and broadcast point."},
+      {id:"zion",name:"Zion",type:"city",layer:"real",x:300,y:560,faction:"crew",blurb:"The last human city, deep near the warm core of the Earth."},
+      {id:"dock",name:"The Dock of Zion",type:"fortress",layer:"real",x:430,y:470,faction:"crew",blurb:"Where APUs stand against a quarter-million Sentinels."},
+      {id:"logos",name:"The Logos",type:"vessel",layer:"real",x:520,y:360,faction:"crew",blurb:"Niobe's fast ship; it carries Neo and Trinity toward 01."},
+      {id:"machinecity",name:"Machine City (01)",type:"portal",layer:"real",x:820,y:300,faction:"agents",blurb:"The heart of the Machines, where a blind man walks in to make peace."},
+    ],
+    characters:[
+      {id:"neo",name:"Neo",color:"#22c55e",role:"The One",blurb:"A hacker who learns the world is a lie, and chooses to end a war on his own terms."},
+      {id:"trinity",name:"Trinity",color:"#67e8f9",role:"Neb crew",blurb:"The one who watches over him — across the simulation and the real."},
+    ],
+    routes:[
+      {id:"r_neo_sim",characterId:"neo",layer:"sim",waypoints:[["metacortex",.02],["hotel",.08],["oracle",.25],["govt",.34],["freeway",.55],["source",.66]]},
+      {id:"r_neo_real",characterId:"neo",layer:"real",waypoints:[["pod",.10],["neb",.14],["zion",.50],["logos",.78],["machinecity",.90]]},
+      {id:"r_trin_real",characterId:"trinity",layer:"real",waypoints:[["neb",.14],["zion",.50],["logos",.78],["machinecity",.88]]},
+    ],
+    events:[
+      {id:"e_rabbit",title:"Follow the White Rabbit",t:.03,loc:"hotel",era:"awaken",kind:"revelation",importance:4,chars:["neo","trinity"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"A message on a black screen leads Neo to Trinity, and to a question about the nature of the world."},
+      {id:"e_redpill",title:"The Red Pill",t:.08,loc:"hotel",era:"awaken",kind:"turning-point",importance:5,chars:["neo"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"“You take the red pill, you stay in Wonderland.” Neo chooses to see how deep the rabbit hole goes."},
+      {id:"e_wake",title:"Neo Wakes in the Pod",t:.10,loc:"pod",era:"awaken",kind:"turning-point",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Real: ~2199 (disputed)",summary:"Neo opens real eyes for the first time in a vast field of harvested bodies — and is flushed out to be reborn. The real-world year is only Morpheus's guess."},
+      {id:"e_oracle",title:"Visiting the Oracle",t:.25,loc:"oracle",era:"awaken",kind:"meeting",importance:4,chars:["neo"],factions:["crew"],source:"canon",date:"Sim: ~1999",summary:"“Being the One is like being in love.” A prophecy is offered, and quietly undercut."},
+      {id:"e_lobby",title:"Rescuing Morpheus",t:.34,loc:"govt",era:"awaken",kind:"battle",importance:4,chars:["neo","trinity"],factions:["crew","agents"],source:"canon",date:"Sim: ~1999",summary:"Neo and Trinity storm the lobby to save Morpheus from the Agents — and Neo begins to bend the rules."},
+      {id:"e_zion",title:"Zion",t:.50,loc:"zion",era:"one",kind:"meeting",importance:4,chars:["neo","trinity"],factions:["crew"],source:"canon",date:"Reloaded",summary:"The last human city dances in the dark, then musters to face an approaching army of machines."},
+      {id:"e_freeway",title:"The Freeway Chase",t:.55,loc:"freeway",era:"one",kind:"journey",importance:3,chars:["trinity"],factions:["crew","exiles"],source:"canon",date:"Reloaded",summary:"A running battle for the Keymaker across fourteen miles of oncoming traffic."},
+      {id:"e_source",title:"The Architect",t:.66,loc:"source",era:"one",kind:"revelation",importance:5,chars:["neo"],factions:["agents"],source:"canon",date:"Reloaded",summary:"The One is not a savior but a system of control — the sixth iteration. Neo refuses the arithmetic and chooses Trinity."},
+      {id:"e_dock",title:"The Battle of Zion",t:.80,loc:"dock",era:"end",kind:"battle",importance:5,chars:[],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"In the dock, APU pilots and a boy named Kid hold the line against a flood of Sentinels."},
+      {id:"e_city",title:"Neo Reaches Machine City",t:.90,loc:"machinecity",era:"end",kind:"turning-point",importance:5,chars:["neo","trinity"],factions:["crew","agents"],source:"canon",date:"Revolutions",summary:"Blinded but seeing, Neo flies the Logos into 01 to bargain with the Machines against a common enemy: Smith."},
+      {id:"e_truce",title:"The Truce",t:.96,loc:"machinecity",era:"end",kind:"loss",importance:5,chars:["neo"],factions:["crew","agents"],source:"canon",date:"The truce",summary:"Neo lets Smith copy him, then is deleted from within — ending the infection, and the war. Dawn breaks over a freed skyline."},
+    ],
+  },
+};
+
+/* =====================================================================
+   STATE — a tiny store (Zustand stand-in). render() projects it purely.
+   ===================================================================== */
+const state = {
+  universe:"lotr", layer:"me", now:0, playing:false, speed:1,
+  selectedEvent:null, selectedChar:null,
+  activeChars:new Set(), activeKinds:new Set(["battle","journey","revelation","meeting","loss","turning-point"]),
+  canonOnly:false, cam:{x:.4,y:.4,z:1},
+};
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+if(reduced) document.body.classList.add("reduced");
+
+const U = () => UNIVERSES[state.universe];
+const byId=(arr,id)=>arr.find(o=>o.id===id);
+const loc = id => byId(U().locations,id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,f)=>a+(b-a)*f;
+
+function labelForT(t){ const A=U().dateAnchors; let best=A[0]; for(const a of A){ if(t>=a[0]) best=a; } return best[1]; }
+
+/* ---- URL <-> state ---- */
+function readURL(){
+  const p=new URLSearchParams(location.search);
+  if(p.has("u") && UNIVERSES[p.get("u")]) state.universe=p.get("u");
+  const u=U();
+  state.layer = u.layers[0].id;
+  if(p.has("layer") && u.layers.some(l=>l.id===p.get("layer"))) state.layer=p.get("layer");
+  if(p.has("t")) state.now=clamp(parseFloat(p.get("t"))||0,0,1);
+  if(p.has("event")) state.selectedEvent=p.get("event");
+  if(p.has("char")) state.selectedChar=p.get("char");
+  if(p.has("canon")) state.canonOnly=p.get("canon")==="only";
+  if(p.has("kinds")) state.activeKinds=new Set(p.get("kinds").split(",").filter(Boolean));
+  state.activeChars=new Set(u.characters.map(c=>c.id));
+  if(p.has("chars")) state.activeChars=new Set(p.get("chars").split(",").filter(Boolean));
+  if(p.has("cam")){ const [x,y,z]=p.get("cam").split(",").map(Number); if(!isNaN(x)) state.cam={x,y,z:z||1}; }
+}
+let urlTimer;
+function writeURL(){
+  clearTimeout(urlTimer);
+  urlTimer=setTimeout(()=>{
+    const p=new URLSearchParams();
+    p.set("u",state.universe);
+    if(U().layers.length>1) p.set("layer",state.layer);
+    p.set("t",state.now.toFixed(3));
+    if(state.selectedEvent) p.set("event",state.selectedEvent);
+    if(state.selectedChar) p.set("char",state.selectedChar);
+    if(state.canonOnly) p.set("canon","only");
+    p.set("kinds",[...state.activeKinds].join(","));
+    p.set("chars",[...state.activeChars].join(","));
+    p.set("cam",`${state.cam.x.toFixed(2)},${state.cam.y.toFixed(2)},${state.cam.z.toFixed(2)}`);
+    history.replaceState(null,"",`?${p.toString()}`);
+  },180);
+}
+
+/* ---- DOM ---- */
+const el=id=>document.getElementById(id);
+const camG=el("cam"), gTerrain=el("terrain"), gRoutes=el("routes"), gLoc=el("locations"), gEvt=el("events"), mapEl=el("map");
+
+/* =====================================================================
+   RENDER
+   ===================================================================== */
+function buildTerrain(){ gTerrain.innerHTML=""; TERRAIN[state.universe](gTerrain, state.layer); }
+
+function buildLocations(){
+  gLoc.innerHTML="";
+  U().locations.filter(l=>l.layer===state.layer).forEach(l=>{
+    const g=E("g",{transform:`translate(${l.x},${l.y})`}); g.style.cursor="pointer";
+    g.setAttribute("tabindex","0"); g.setAttribute("role","button"); g.setAttribute("aria-label",`Location: ${l.name}`);
+    const fac=byId(U().factions,l.faction);
+    g.append(
+      E("circle",{r:6,fill:"var(--u-map-1)",stroke:fac?fac.color:"var(--u-line)","stroke-width":2}),
+      E("circle",{r:2.4,fill:fac?fac.color:"var(--u-line)"}),
+    );
+    const label=E("text",{x:9,y:4,class:"loc-label"}); label.textContent=l.name; g.append(label);
+    const open=()=>selectLocation(l.id);
+    g.addEventListener("click",open);
+    g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}});
+    gLoc.appendChild(g);
+  });
+}
+
+function routePath(route,upto){
+  const w=route.waypoints, pts=[];
+  for(let i=0;i<w.length;i++){
+    const [lid,wt]=w[i], L=loc(lid); if(!L) continue;
+    if(wt<=upto) pts.push([L.x,L.y]);
+    else { if(i>0){ const [plid,pwt]=w[i-1], P=loc(plid); const f=clamp((upto-pwt)/(wt-pwt),0,1); pts.push([lerp(P.x,L.x,f),lerp(P.y,L.y,f)]); } break; }
+  }
+  return pts;
+}
+function renderRoutes(){
+  gRoutes.innerHTML="";
+  U().routes.forEach(route=>{
+    if(route.layer!==state.layer) return;
+    const ch=byId(U().characters,route.characterId);
+    if(!state.activeChars.has(ch.id)) return;
+    const hi = state.selectedChar===ch.id || !state.selectedChar;
+    const full=route.waypoints.map(([lid])=>{const L=loc(lid);return L?[L.x,L.y]:null;}).filter(Boolean);
+    gRoutes.appendChild(E("polyline",{points:full.map(p=>p.join(",")).join(" "),fill:"none",stroke:ch.color,"stroke-width":1.2,"stroke-dasharray":"2 6",opacity:hi?.35:.12}));
+    const pts=routePath(route,state.now);
+    if(pts.length>1){
+      gRoutes.appendChild(E("polyline",{points:pts.map(p=>p.join(",")).join(" "),fill:"none",stroke:ch.color,"stroke-width":state.selectedChar===ch.id?3.4:2.2,"stroke-linejoin":"round","stroke-linecap":"round",opacity:hi?.95:.5}));
+      const h=pts[pts.length-1];
+      gRoutes.appendChild(E("circle",{cx:h[0],cy:h[1],r:4.5,fill:ch.color,stroke:"var(--u-map-1)","stroke-width":1.5}));
+    }
+  });
+}
+function visibleEvents(){
+  return U().events.filter(ev=>{
+    if(loc(ev.loc).layer!==state.layer) return false;
+    if(state.canonOnly && ev.source!=="canon") return false;
+    if(!state.activeKinds.has(ev.kind)) return false;
+    return true;
+  });
+}
+function renderEvents(){
+  gEvt.innerHTML="";
+  visibleEvents().forEach(ev=>{
+    const L=loc(ev.loc), passed=state.now>=ev.t-.001, sel=state.selectedEvent===ev.id, interp=ev.source!=="canon";
+    const g=E("g",{transform:`translate(${L.x},${L.y})`,opacity:passed?1:.28}); g.style.cursor="pointer";
+    g.setAttribute("tabindex","0"); g.setAttribute("role","button"); g.setAttribute("aria-label",`Event: ${ev.title}, ${ev.date}`);
+    const r=4+ev.importance*1.1, col=interp?"var(--u-danger)":"var(--u-primary)";
+    if(sel) g.appendChild(E("circle",{r:r+6,fill:"none",stroke:col,"stroke-width":1.5,opacity:.5}));
+    g.appendChild(E("circle",{r,fill:passed?col:"none",stroke:col,"stroke-width":2,"stroke-dasharray":interp?"3 3":"none"}));
+    if(passed && ev.importance>=5){ const lbl=E("text",{x:0,y:-r-6,"text-anchor":"middle",class:"evt-label"}); lbl.textContent=ev.title; g.append(lbl); }
+    const open=()=>selectEvent(ev.id);
+    g.addEventListener("click",open);
+    g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}});
+    gEvt.appendChild(g);
+  });
+}
+
+/* ---- camera ---- */
+let camAnim=null;
+function applyCam(){ const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700; camG.setAttribute("transform",`translate(${1000/2-cx*z},${700/2-cy*z}) scale(${z})`); }
+function flyTo(nx,ny,nz,cb){
+  const from={...state.cam}, to={x:nx,y:ny,z:nz};
+  if(reduced){ state.cam=to; applyCam(); cb&&cb(); return; }
+  if(camAnim) cancelAnimationFrame(camAnim);
+  let start=null;
+  (function step(ts){ if(start===null)start=ts; const f=clamp((ts-start)/650,0,1), e=1-Math.pow(1-f,3);
+    state.cam={x:lerp(from.x,to.x,e),y:lerp(from.y,to.y,e),z:lerp(from.z,to.z,e)}; applyCam();
+    if(f<1) camAnim=requestAnimationFrame(step); else { writeURL(); cb&&cb(); } })(performance.now());
+}
+
+/* =====================================================================
+   SELECTION — the interaction loop.
+   ===================================================================== */
+function ensureLayerFor(id){ const L=loc(id); if(L && L.layer!==state.layer){ setLayer(L.layer,{silent:true}); } }
+function selectEvent(id){
+  const ev=byId(U().events,id); if(!ev) return;
+  ensureLayerFor(ev.loc);
+  state.selectedEvent=id;
+  const L=loc(ev.loc);
+  setNow(ev.t,{fromSelect:true});
+  flyTo(L.x/1000,L.y/700,2.0);
+  openEventDetail(ev); render(); writeURL();
+}
+function selectLocation(id){
+  const L=loc(id); if(!L) return;
+  ensureLayerFor(id);
+  flyTo(L.x/1000,L.y/700,1.9);
+  const evts=U().events.filter(e=>e.loc===id);
+  const chars=[...new Set(evts.flatMap(e=>e.chars))];
+  openDetail({kind:"Location",title:L.name,when:byId(U().factions,L.faction)?.name||"",
+    bodyHTML:`<p>${L.blurb}</p>
+      ${evts.length?`<div class="section-label">Events here</div><div class="link-list">${evts.map(e=>`<button data-ev="${e.id}">${e.title}</button>`).join("")}</div>`:""}
+      ${chars.length?`<div class="section-label">Who passes through</div><div class="link-list">${chars.map(c=>`<button data-ch="${c}">${byId(U().characters,c).name}</button>`).join("")}</div>`:""}`});
+  writeURL();
+}
+function selectCharacter(id){
+  const ch=byId(U().characters,id); if(!ch) return;
+  state.selectedChar = state.selectedChar===id ? null : id;
+  state.activeChars.add(id);
+  if(state.selectedChar){
+    const routes=U().routes.filter(r=>r.characterId===id);
+    const wp=routes.flatMap(r=>r.waypoints.map(w=>[...w,r.layer]));
+    openDetail({kind:"Character",title:ch.name,when:ch.role,
+      bodyHTML:`<p>${ch.blurb}</p>
+        <div class="section-label">Journey — scrub the timeline to trace the path</div>
+        <div class="link-list">${wp.map(([lid,wt,lay])=>`<button data-jump="${wt}" data-loc="${lid}">${loc(lid)?.name||lid}</button>`).join("")}</div>`});
+  }
+  render(); writeURL();
+}
+function openEventDetail(ev){
+  const chars=ev.chars.map(c=>byId(U().characters,c)).filter(Boolean);
+  const factions=ev.factions.map(f=>byId(U().factions,f)).filter(Boolean);
+  const tag = ev.source==="canon"?"Canon":ev.source==="interpretation"?"≈ Interpretation":"Adaptation";
+  openDetail({kind:ev.kind.replace("-"," "),title:ev.title,when:ev.date,
+    bodyHTML:`<span class="badge ${ev.source}">${tag}</span>
+      <p style="margin-top:10px">${ev.summary}</p>
+      <div class="section-label">At</div><div class="link-list"><button data-loc="${ev.loc}">${loc(ev.loc).name}</button></div>
+      ${chars.length?`<div class="section-label">Characters</div><div class="link-list">${chars.map(c=>`<button data-ch="${c.id}">${c.name}</button>`).join("")}</div>`:""}
+      ${factions.length?`<div class="section-label">Factions</div><div class="link-list">${factions.map(f=>`<span class="badge" style="background:${f.color}22;color:${f.color};border:1px solid ${f.color}">${f.name}</span>`).join(" ")}</div>`:""}`});
+}
+function openDetail({kind,title,when,bodyHTML}){
+  el("dKind").textContent=kind; el("dTitle").textContent=title; el("dWhen").textContent=when||"";
+  el("dBody").innerHTML=bodyHTML; el("detail").classList.add("open");
+  el("dBody").querySelectorAll("[data-ev]").forEach(b=>b.onclick=()=>selectEvent(b.dataset.ev));
+  el("dBody").querySelectorAll("[data-ch]").forEach(b=>b.onclick=()=>selectCharacter(b.dataset.ch));
+  el("dBody").querySelectorAll("[data-loc]").forEach(b=>b.onclick=()=>selectLocation(b.dataset.loc));
+  el("dBody").querySelectorAll("[data-jump]").forEach(b=>b.onclick=()=>{ ensureLayerFor(b.dataset.loc); setNow(parseFloat(b.dataset.jump)); const L=loc(b.dataset.loc); if(L) flyTo(L.x/1000,L.y/700,1.9); render(); });
+}
+el("dClose").onclick=()=>{ el("detail").classList.remove("open"); state.selectedEvent=null; state.selectedChar=null; render(); writeURL(); };
+
+/* =====================================================================
+   TIMELINE
+   ===================================================================== */
+const scrub=el("scrub"), fill=el("fill"), playhead=el("playhead"), track=el("track");
+function setNow(t,opts={}){
+  state.now=clamp(t,0,1);
+  scrub.value=Math.round(state.now*1000);
+  const pct=state.now*100; fill.style.width=pct+"%"; playhead.style.left=pct+"%";
+  el("nowDate").textContent=labelForT(state.now);
+  const eras=U().eras, era=eras.find((e,i)=>state.now>=e.from && (state.now<e.to||i===eras.length-1))||eras[eras.length-1];
+  el("nowYear").textContent=U().timeSub+" · "+era.name;
+  el("eraLabel").innerHTML=`<b>${era.name}</b><br><span style="opacity:.7">${era.blurb}</span>`;
+  renderRoutes(); renderEvents(); markTicks();
+  if(!opts.fromSelect) writeURL();
+}
+scrub.addEventListener("input",()=>{ pause(); setNow(scrub.value/1000); });
+
+function buildTicks(){
+  track.querySelectorAll(".tick").forEach(t=>t.remove());
+  visibleEvents().forEach(ev=>{
+    const tick=document.createElement("button");
+    tick.className="tick"+(ev.source!=="canon"?" interpretation":"");
+    tick.style.left=(ev.t*100)+"%"; tick.title=`${ev.title} — ${ev.date}`;
+    tick.setAttribute("aria-label",`Jump to ${ev.title}`); tick.dataset.ev=ev.id; tick.dataset.t=ev.t;
+    tick.onclick=()=>selectEvent(ev.id);
+    tick.onmouseenter=()=>{ const tip=el("tlTip"); tip.style.display="block"; tip.style.left=(ev.t*100)+"%"; tip.textContent=ev.title; };
+    tick.onmouseleave=()=>{ el("tlTip").style.display="none"; };
+    track.appendChild(tick);
+  });
+  markTicks();
+}
+function markTicks(){ track.querySelectorAll(".tick").forEach(t=>{ t.dataset.passed=(state.now>=parseFloat(t.dataset.t)-.001); t.classList.toggle("sel",t.dataset.ev===state.selectedEvent); }); }
+
+/* ---- playback ---- */
+let raf=null,last=null;
+function play(){ if(state.now>=1) setNow(0); state.playing=true; el("play").textContent="❚❚"; el("play").setAttribute("aria-label","Pause"); last=null; raf=requestAnimationFrame(tick); }
+function pause(){ state.playing=false; el("play").textContent="▶"; el("play").setAttribute("aria-label","Play"); if(raf)cancelAnimationFrame(raf); raf=null; }
+function tick(ts){ if(!state.playing) return; if(last===null)last=ts; const dt=(ts-last)/1000; last=ts;
+  setNow(state.now+(dt/90)*state.speed);
+  if(state.now>=1){ pause(); toast(U().axisTo.split("—").pop().trim()); return; } raf=requestAnimationFrame(tick); }
+el("play").onclick=()=> state.playing?pause():play();
+el("speed").onclick=()=>{ const s=[1,2,4,.5]; state.speed=s[(s.indexOf(state.speed)+1)%s.length]; el("speed").textContent=state.speed+"×"; };
+
+/* =====================================================================
+   CONTROLS
+   ===================================================================== */
+function buildUniverseSwitch(){
+  const nav=el("universeSwitch"); nav.innerHTML="";
+  Object.values(UNIVERSES).forEach(u=>{
+    const b=document.createElement("button"); b.textContent=u.name; b.setAttribute("aria-current", u.id===state.universe);
+    b.onclick=()=>setUniverse(u.id); nav.appendChild(b);
+  });
+}
+function buildLayerChips(){
+  const grp=el("layerGroup"), box=el("layerChips");
+  if(U().layers.length<2){ grp.hidden=true; return; }
+  grp.hidden=false; box.innerHTML="";
+  el("layerTitle").textContent = state.universe==="matrix" ? "Reality" : "Layer";
+  U().layers.forEach(l=>{
+    const b=document.createElement("button"); b.className="chip"; b.textContent=l.name;
+    b.setAttribute("aria-pressed", l.id===state.layer);
+    b.onclick=()=>setLayer(l.id); box.appendChild(b);
+  });
+}
+function buildChips(){
+  const cc=el("charChips"); cc.innerHTML="";
+  U().characters.forEach(ch=>{
+    const lab=document.createElement("label"); lab.className="chip"; lab.dataset.on=state.activeChars.has(ch.id);
+    lab.innerHTML=`<span class="dot" style="background:${ch.color}"></span>${ch.name}`;
+    lab.onclick=()=>{ state.activeChars.has(ch.id)?state.activeChars.delete(ch.id):state.activeChars.add(ch.id); lab.dataset.on=state.activeChars.has(ch.id); render(); writeURL(); };
+    cc.appendChild(lab);
+  });
+  const kc=el("kindChips"); kc.innerHTML="";
+  [["battle","#7c2d2d"],["journey","#2f6b8f"],["turning-point","#b8863b"],["loss","#5b4a2f"],["meeting","#4c6141"],["revelation","#8a5a9a"]].forEach(([k,c])=>{
+    const lab=document.createElement("label"); lab.className="chip"; lab.dataset.on=state.activeKinds.has(k);
+    lab.innerHTML=`<span class="dot" style="background:${c}"></span>${k.replace("-"," ")}`;
+    lab.onclick=()=>{ state.activeKinds.has(k)?state.activeKinds.delete(k):state.activeKinds.add(k); lab.dataset.on=state.activeKinds.has(k); render(); buildTicks(); writeURL(); };
+    kc.appendChild(lab);
+  });
+}
+el("canonToggle").querySelector("input").onchange=e=>{ state.canonOnly=e.target.checked; render(); buildTicks(); writeURL(); };
+el("zin").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z*1.4,1,4));
+el("zout").onclick=()=>flyTo(state.cam.x,state.cam.y,clamp(state.cam.z/1.4,1,4));
+el("zreset").onclick=()=>flyTo(.4,.4,1);
+el("renderToggle").onclick=()=>{ document.body.classList.toggle("low-power"); const low=document.body.classList.contains("low-power"); el("renderToggle").textContent=low?"2D · low":"2D ✓"; toast(low?"Low-power tier: motion & effects reduced":"Standard 2D tier"); };
+
+/* ---- universe / layer switching ---- */
+function applyUniverseChrome(){
+  const u=U();
+  applyTheme(u.id);
+  el("tagline").textContent=u.tagline;
+  el("axisFrom").textContent=u.axisFrom; el("axisTo").textContent=u.axisTo;
+  el("mapNote").textContent = u.note || "Geography is stylized & interpretive — relative topology, not real coordinates.";
+  el("canonToggle").querySelector("input").checked=state.canonOnly;
+  buildUniverseSwitch(); buildLayerChips(); buildChips();
+  document.querySelectorAll(".universe-switch button").forEach(b=>b.setAttribute("aria-current", b.textContent===u.name));
+}
+function setUniverse(id, opts={}){
+  if(id===state.universe && !opts.force) return;
+  pause();
+  state.universe=id; state.layer=U().layers[0].id;
+  state.selectedEvent=null; state.selectedChar=null;
+  state.activeChars=new Set(U().characters.map(c=>c.id));
+  state.canonOnly=false; state.cam={x:.4,y:.4,z:1};
+  el("detail").classList.remove("open");
+  applyUniverseChrome();
+  buildTerrain(); buildLocations(); buildTicks();
+  setNow(state.now,{fromSelect:true}); render();
+  searchIdx=buildSearchIndex();
+  writeURL();
+  if(!opts.boot) toast(`${U().name} — ${U().tagline}`);
+}
+function setLayer(id, opts={}){
+  if(!U().layers.some(l=>l.id===id)) return;
+  state.layer=id;
+  document.querySelectorAll("#layerChips button").forEach(b=>b.setAttribute("aria-pressed", b.textContent===byId(U().layers,id).name));
+  buildTerrain(); buildLocations(); buildTicks(); render();
+  if(!opts.silent){ writeURL(); toast(byId(U().layers,id).name); }
+}
+
+/* ---- pan & zoom ---- */
+let dragging=false,dragStart=null;
+mapEl.addEventListener("pointerdown",e=>{ dragging=true; dragStart={x:e.clientX,y:e.clientY,cx:state.cam.x,cy:state.cam.y}; mapEl.setPointerCapture(e.pointerId); });
+mapEl.addEventListener("pointermove",e=>{ if(!dragging)return; const rect=mapEl.getBoundingClientRect();
+  state.cam.x=clamp(dragStart.cx-(e.clientX-dragStart.x)/rect.width/state.cam.z,0,1);
+  state.cam.y=clamp(dragStart.cy-(e.clientY-dragStart.y)/rect.height/state.cam.z,0,1); applyCam(); });
+mapEl.addEventListener("pointerup",()=>{ if(dragging){ dragging=false; writeURL(); }});
+mapEl.addEventListener("wheel",e=>{ e.preventDefault(); state.cam.z=clamp(state.cam.z*(e.deltaY<0?1.12:.89),1,4); applyCam(); writeURL(); },{passive:false});
+
+/* ---- search ---- */
+const searchInput=el("searchInput"), searchResults=el("searchResults");
+function buildSearchIndex(){ return [
+  ...U().events.map(e=>({label:e.title,sub:e.date,act:()=>selectEvent(e.id)})),
+  ...U().locations.map(l=>({label:l.name,sub:"Location",act:()=>selectLocation(l.id)})),
+  ...U().characters.map(c=>({label:c.name,sub:c.role,act:()=>selectCharacter(c.id)})),
+]; }
+let searchIdx=[];
+searchInput.addEventListener("input",()=>{
+  const q=searchInput.value.toLowerCase().trim();
+  if(!q){ searchResults.classList.remove("open"); return; }
+  const hits=searchIdx.filter(i=>i.label.toLowerCase().includes(q)).slice(0,8);
+  searchResults.innerHTML=hits.map((h,i)=>`<button data-i="${i}">${h.label} <small>· ${h.sub}</small></button>`).join("")||`<button disabled>No matches</button>`;
+  searchResults.classList.add("open");
+  searchResults.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{ hits[b.dataset.i].act(); searchResults.classList.remove("open"); searchInput.value=""; });
+});
+document.addEventListener("click",e=>{ if(!e.target.closest(".search")) searchResults.classList.remove("open"); });
+
+/* ---- keyboard ---- */
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT") return;
+  if(e.key===" "){ e.preventDefault(); state.playing?pause():play(); }
+  if(e.key==="ArrowRight"){ pause(); setNow(state.now+.02); }
+  if(e.key==="ArrowLeft"){ pause(); setNow(state.now-.02); }
+  if(e.key==="Escape") el("dClose").click();
+});
+
+/* ---- toast ---- */
+let toastTimer;
+function toast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2600); }
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+function render(){ renderRoutes(); renderEvents(); markTicks(); applyCam(); }
+function boot(){
+  readURL();
+  applyUniverseChrome();
+  searchIdx=buildSearchIndex();
+  buildTerrain(); buildLocations(); buildTicks();
+  applyCam(); setNow(state.now,{fromSelect:true}); render();
+  if(state.selectedEvent){ const ev=byId(U().events,state.selectedEvent); if(ev){ ensureLayerFor(ev.loc); openEventDetail(ev); el("detail").classList.add("open"); buildLocations(); buildTicks(); render(); } }
+  else if(state.selectedChar) selectCharacter(state.selectedChar);
+  toast("Switch worlds up top · scrub or press ▶ to watch a journey unfold");
+}
+boot();
+</script>
+</body>
+</html>
