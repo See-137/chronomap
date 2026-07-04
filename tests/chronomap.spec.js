@@ -245,6 +245,24 @@ test.describe("shaded-relief terrain", () => {
   });
 });
 
+test.describe("map cartouche & ambient shimmer", () => {
+  test("each world draws a themed title cartouche", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await expect(page.locator("#terrain text", { hasText: "Middle-earth" })).toBeVisible();
+    await open(page, "?u=hp");
+    await expect(page.locator("#terrain text", { hasText: "Wizarding Britain" })).toBeVisible();
+    await open(page, "?u=matrix");
+    await expect(page.locator("#terrain text", { hasText: "The Simulation" })).toBeVisible();
+  });
+
+  test("ambient water shimmer animates on the capable tier, gone in low-power", async ({ page }) => {
+    await open(page, "?u=lotr");
+    expect(await page.locator("#terrain animate").count()).toBeGreaterThan(0); // shallows + river glints
+    await page.locator("#renderToggle").click();
+    expect(await page.locator("#terrain animate").count()).toBe(0);
+  });
+});
+
 test.describe("overview minimap", () => {
   test("renders the land silhouette and a dot per location", async ({ page }) => {
     await open(page, "?u=lotr");

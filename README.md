@@ -18,8 +18,9 @@ Settings → Pages → Source: Deploy from a branch → `main` / `(root)`).
   shallows, hypsometric elevation tints, a directional hillshade, and a parchment
   grain — with shaded mountain ranges (sunlit/shadow faces + snow), forest canopy
   masses, tapered river networks, roads, region labels, and map furniture
-  (compass, graticule, neatline frame). Three parallax depth planes shift as you
-  pan for a faux-3D sense of depth.
+  (an ornamental title cartouche, compass, graticule, neatline frame). Three
+  parallax depth planes shift as you pan for a faux-3D sense of depth, and coasts
+  and rivers shimmer gently on the capable tier.
 - **Overview minimap.** A corner minimap shows the full map extent, every location,
   and a live viewport rectangle — click or drag it to jump anywhere, so the whole
   map stays legible at any zoom level.
