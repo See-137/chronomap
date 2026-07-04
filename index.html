@@ -47,7 +47,9 @@
       linear-gradient(160deg, var(--u-body-2a), var(--u-body-2b));
     transition: background .6s ease, color .6s ease;
   }
-  .app { display:grid; grid-template-rows:auto 1fr auto; height:100dvh; }
+  /* grid-template-columns: minmax(0,1fr) so a wide child (e.g. footer axis text)
+     can't force the single column to its min-content and overflow the viewport. */
+  .app { display:grid; grid-template-rows:auto 1fr auto; grid-template-columns:minmax(0,1fr); height:100dvh; }
 
   header.topbar {
     display:flex; align-items:center; gap:14px; padding:10px 16px;
@@ -70,7 +72,16 @@
     border-radius:8px; border:1px solid var(--u-secondary); background:rgba(127,127,127,.12); color:var(--u-header-text);
   }
   .search input::placeholder { color:var(--u-header-text); opacity:.5; }
-  .search svg { position:absolute; left:9px; top:8px; opacity:.6; }
+  .search .search-icon { position:absolute; left:9px; top:8px; opacity:.6; pointer-events:none; }
+
+  /* Compact icon buttons (drawer + mobile search toggles) — hidden on desktop. */
+  .icon-btn { display:none; place-items:center; width:40px; height:40px; flex:0 0 auto;
+    border:1px solid var(--u-secondary); border-radius:9px; background:transparent; color:var(--u-header-text); cursor:pointer; }
+  .icon-btn[hidden] { display:none; }
+  /* Scrim behind the mobile drawer. */
+  .scrim { position:absolute; inset:0; background:rgba(0,0,0,.42); z-index:55; opacity:0; transition:opacity .3s; }
+  .scrim.show { opacity:1; }
+  .scrim[hidden] { display:none; }
   .search-results {
     position:absolute; top:40px; left:0; right:0; background:var(--u-panel); color:var(--u-text);
     border-radius:8px; box-shadow:var(--shadow); overflow:hidden auto; display:none; z-index:40; max-height:320px;
@@ -173,6 +184,7 @@
 
   .loc-label { font-family:var(--font-serif); font-size:12px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
   .evt-label { font-family:var(--font-ui); font-size:11px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
+  .evt-label.sel { fill:var(--u-primary); font-weight:600; }
   .region-label { font-family:var(--font-serif); font-size:20px; fill:var(--u-secondary); opacity:.28; letter-spacing:3px; text-transform:uppercase; pointer-events:none; }
 
   /* Location markers: elevate on hover/focus for a tactile 3D feel. */
@@ -194,7 +206,7 @@
   .minimap:hover { opacity:1; }
   .minimap svg { width:100%; height:100%; display:block; }
   #mmView { transition:none; }
-  @media (max-width:760px){ .minimap { width:118px; height:84px; right:8px; bottom:10px; } }
+  /* (mobile minimap sizing/position lives in the single mobile media block below) */
 
   /* Contextual arrival card — richer than the repeated place name. */
   .arrival-card { position:absolute; z-index:22; min-width:170px; max-width:230px;
@@ -217,11 +229,45 @@
   .toast.show { opacity:1; }
 
   [hidden] { display:none !important; }
+
+  /* Touch devices: enlarge tap targets to the ~44px guideline (desktop untouched). */
+  @media (pointer:coarse) {
+    .chip { padding:9px 12px; font-size:13px; }
+    .universe-switch button { padding:9px 14px; font-size:13px; }
+    .zoombar button, .render-toggle { width:44px; height:44px; }
+    .render-toggle { width:auto; min-height:44px; }
+    .link-list button { padding:9px 12px; }
+    .search-results button { padding:12px 14px; }
+    .play { width:46px; height:46px; }
+  }
+
   @media (max-width:760px) {
-    .controls { width:200px; transform:scale(.92); transform-origin:top left; }
+    header.topbar { gap:8px; padding:8px 10px; }
+    .icon-btn { display:grid; }
     .brand span { display:none; }
+    .brand b { font-size:16px; }
     .tl-era { display:none; }
-    aside.detail { width:100%; }
+    header.topbar { flex-wrap:nowrap; }
+    .brand { flex:0 0 auto; }
+    /* Universe switch takes ONLY the leftover space (flex-basis:0) and scrolls horizontally. */
+    .universe-switch { margin-left:2px; flex:1 1 0; min-width:0; overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .universe-switch::-webkit-scrollbar { display:none; }
+    .universe-switch button { white-space:nowrap; }
+    /* Search collapses to an icon that expands to a full-width field. */
+    .search { margin-left:0; flex:0 0 auto; }
+    .search .search-icon, .search input { display:none; }
+    .search.expanded .search-icon { display:block; top:14px; left:16px; }
+    .search.expanded input { display:block; position:fixed; top:56px; left:10px; right:10px; width:auto; max-width:none; z-index:65; padding:11px 12px 11px 34px; }
+    .search.expanded .search-results { position:fixed; top:100px; left:10px; right:10px; }
+    /* Controls become a left drawer, closed by default. */
+    .controls { top:0; left:0; height:100dvh; max-height:none; width:min(82vw,300px); border-radius:0;
+      transform:translateX(-105%); transition:transform .3s cubic-bezier(.2,.8,.2,1); z-index:60; }
+    .controls.open { transform:translateX(0); }
+    .reduced .controls { transition:none; }
+    /* Detail panel goes truly full-screen (no 92vw cap, no clipping). */
+    aside.detail { width:100vw; max-width:none; border-left:none; }
+    /* Keep the minimap clear of the drawer + footer. */
+    .minimap { width:118px; height:84px; right:8px; bottom:96px; }
   }
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 </style>
@@ -237,10 +283,16 @@
 <div class="app" id="app">
 
   <header class="topbar">
+    <button class="icon-btn" id="drawerToggle" aria-label="Filters and layers" aria-controls="controls" aria-expanded="false">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <div class="brand"><b>Chronomap</b><span id="tagline">The War of the Ring</span></div>
     <nav class="universe-switch" aria-label="Universe" id="universeSwitch"></nav>
-    <div class="search">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+    <div class="search" id="search">
+      <button class="icon-btn search-toggle" id="searchToggle" aria-label="Search" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      </button>
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
       <input id="searchInput" type="text" placeholder="Search events, places, people…" autocomplete="off" aria-label="Search"
              role="combobox" aria-expanded="false" aria-controls="searchResults" aria-autocomplete="list" />
       <div class="search-results" id="searchResults" role="listbox" aria-label="Search results"></div>
@@ -248,6 +300,7 @@
   </header>
 
   <div class="stage" id="stage">
+    <div class="scrim" id="scrim" hidden></div>
     <svg class="map" id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" role="group" aria-label="Interactive map — locations and events are focusable">
       <defs>
         <radialGradient id="mapbg" cx="45%" cy="35%" r="80%">
@@ -300,7 +353,7 @@
       </svg>
     </div>
 
-    <div class="controls" role="group" aria-label="Layers and filters">
+    <div class="controls" id="controls" role="group" aria-label="Layers and filters">
       <div class="group" id="layerGroup" hidden>
         <h3 id="layerTitle">Reality</h3>
         <div id="layerChips"></div>
@@ -910,7 +963,18 @@ function visibleEvents(){
 }
 function renderEvents(){
   gEvt.innerHTML="";
-  visibleEvents().forEach(ev=>{
+  const evs=visibleEvents();
+  // Decide which labels to show so titles stop stacking when many events are passed:
+  // the SELECTED event always, then passed importance-5 events greedily placed only if
+  // they don't overlap an already-placed label. Cheap char-width estimate (no getBBox).
+  const placed=[], labelSet=new Set();
+  const overlaps=(a,b)=> a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+  evs.filter(ev=>{ const L=loc(ev.loc); return L && state.now>=ev.t-.001 && (ev.importance>=5 || state.selectedEvent===ev.id); })
+    .sort((a,b)=> (b.id===state.selectedEvent?1:0)-(a.id===state.selectedEvent?1:0) || b.importance-a.importance || a.t-b.t)
+    .forEach(ev=>{ const L=loc(ev.loc), r=4+ev.importance*1.1, w=ev.title.length*6.2+8;
+      const box={x:L.x-w/2, y:L.y-r-20, w, h:15};
+      if(state.selectedEvent===ev.id || !placed.some(p=>overlaps(box,p))){ labelSet.add(ev.id); placed.push(box); } });
+  evs.forEach(ev=>{
     const L=loc(ev.loc); if(!L) return;             // visibleEvents already guards, but stay defensive
     const passed=state.now>=ev.t-.001, sel=state.selectedEvent===ev.id, interp=ev.source!=="canon";
     const g=E("g",{transform:`translate(${L.x},${L.y})`,opacity:passed?1:.28}); g.style.cursor="pointer";
@@ -918,7 +982,7 @@ function renderEvents(){
     const r=4+ev.importance*1.1, col=interp?"var(--u-danger)":"var(--u-primary)";
     if(sel) g.appendChild(E("circle",{r:r+6,fill:"none",stroke:col,"stroke-width":1.5,opacity:.5}));
     g.appendChild(E("circle",{r,fill:passed?col:"none",stroke:col,"stroke-width":2,"stroke-dasharray":interp?"3 3":"none"}));
-    if(passed && ev.importance>=5){ const lbl=E("text",{x:0,y:-r-6,"text-anchor":"middle",class:"evt-label"}); lbl.textContent=ev.title; g.append(lbl); }
+    if(labelSet.has(ev.id)){ const lbl=E("text",{x:0,y:-r-6,"text-anchor":"middle",class:"evt-label"+(sel?" sel":"")}); lbl.textContent=ev.title; g.append(lbl); }
     const open=()=>selectEvent(ev.id);
     g.addEventListener("click",open);
     g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}});
@@ -1042,6 +1106,7 @@ function openEventDetail(ev, opts){
 let detailReturnFocus=null;
 function openDetail({kind,title,when,bodyHTML}, opts={}){
   const wasOpen=el("detail").classList.contains("open");
+  closeDrawer();   // on mobile, don't stack the drawer under the detail sheet (no-op if closed / on desktop)
   if(!wasOpen && document.activeElement && document.activeElement!==document.body) detailReturnFocus=document.activeElement;
   el("dKind").textContent=kind; el("dTitle").textContent=title; el("dWhen").textContent=when||"";
   el("dBody").innerHTML=bodyHTML; el("detail").classList.add("open");
@@ -1207,6 +1272,34 @@ el("renderToggle").onclick=()=>{
   toast(low?"Low-power tier: motion & effects reduced":"Standard 2D tier");
 };
 
+/* ---- mobile chrome: controls drawer + collapsible search ---- */
+const controlsEl=el("controls"), drawerBtn=el("drawerToggle"), scrim=el("scrim");
+let drawerReturnFocus=null;
+function openDrawer(){
+  drawerReturnFocus=document.activeElement;
+  controlsEl.classList.add("open"); drawerBtn.setAttribute("aria-expanded","true");
+  scrim.hidden=false; requestAnimationFrame(()=>scrim.classList.add("show"));
+  const first=controlsEl.querySelector("button,input,label,[tabindex]"); if(first) first.focus();
+}
+function closeDrawer(){
+  if(!controlsEl.classList.contains("open")) return;
+  controlsEl.classList.remove("open"); drawerBtn.setAttribute("aria-expanded","false");
+  scrim.classList.remove("show"); setTimeout(()=>{ scrim.hidden=true; },300);
+  if(drawerReturnFocus && document.contains(drawerReturnFocus)) drawerReturnFocus.focus();
+}
+drawerBtn.onclick=()=> controlsEl.classList.contains("open") ? closeDrawer() : openDrawer();
+scrim.onclick=closeDrawer;
+
+const searchWrap=el("search"), searchBtn=el("searchToggle");
+function toggleSearch(){
+  const on=!searchWrap.classList.contains("expanded");
+  searchWrap.classList.toggle("expanded",on); searchBtn.setAttribute("aria-expanded",on?"true":"false");
+  if(on) searchInput.focus(); else { searchInput.value=""; closeSearch(); }
+}
+// Collapse the mobile search overlay (Escape / outside-tap / after a result is chosen).
+function collapseSearch(){ if(searchWrap.classList.contains("expanded")){ searchWrap.classList.remove("expanded"); searchBtn.setAttribute("aria-expanded","false"); } }
+searchBtn.onclick=toggleSearch;
+
 /* ---- universe / layer switching ---- */
 function applyUniverseChrome(){
   const u=U();
@@ -1275,16 +1368,16 @@ function runSearch(){
   searchResults.classList.add("open"); searchInput.setAttribute("aria-expanded","true");
   searchResults.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>chooseSearch(+b.dataset.i));
 }
-function chooseSearch(i){ const h=searchHits[i]; if(!h) return; h.act(); closeSearch(); searchInput.value=""; }
+function chooseSearch(i){ const h=searchHits[i]; if(!h) return; h.act(); closeSearch(); collapseSearch(); searchInput.value=""; }
 searchInput.addEventListener("input",runSearch);
 searchInput.addEventListener("keydown",e=>{
   const open=searchResults.classList.contains("open");
   if(e.key==="ArrowDown"){ if(!open){ runSearch(); return; } e.preventDefault(); searchActive=Math.min(searchActive+1,searchHits.length-1); highlightSearch(); }
   else if(e.key==="ArrowUp"){ if(!open) return; e.preventDefault(); searchActive=Math.max(searchActive-1,0); highlightSearch(); }
   else if(e.key==="Enter"){ if(open && searchHits.length){ e.preventDefault(); chooseSearch(searchActive>=0?searchActive:0); } }
-  else if(e.key==="Escape"){ if(open){ e.stopPropagation(); closeSearch(); } }
+  else if(e.key==="Escape"){ e.stopPropagation(); closeSearch(); collapseSearch(); searchInput.blur(); }
 });
-document.addEventListener("click",e=>{ if(!e.target.closest(".search")) closeSearch(); });
+document.addEventListener("click",e=>{ if(!e.target.closest(".search")){ closeSearch(); collapseSearch(); } });
 
 /* ---- keyboard ---- */
 document.addEventListener("keydown",e=>{
@@ -1292,7 +1385,10 @@ document.addEventListener("keydown",e=>{
   if(e.key===" "){ e.preventDefault(); state.playing?pause():play(); }
   if(e.key==="ArrowRight"){ pause(); setNow(state.now+.02); }
   if(e.key==="ArrowLeft"){ pause(); setNow(state.now-.02); }
-  if(e.key==="Escape" && el("detail").classList.contains("open")) closeDetail();
+  if(e.key==="Escape"){
+    if(el("detail").classList.contains("open")) closeDetail();
+    else if(controlsEl.classList.contains("open")) closeDrawer();
+  }
 });
 
 /* ---- toast ---- */

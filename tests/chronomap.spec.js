@@ -15,6 +15,88 @@ async function open(page, query = "") {
   return errors;
 }
 
+test.describe("responsive mobile layout", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test("drawer toggle appears and the controls start closed", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await expect(page.locator("#drawerToggle")).toBeVisible();
+    await expect(page.locator("#controls")).not.toHaveClass(/open/);
+    await expect(page.locator("#drawerToggle")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("drawer opens on tap and closes on scrim / Escape", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#drawerToggle").click();
+    await expect(page.locator("#controls")).toHaveClass(/open/);
+    await expect(page.locator("#drawerToggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#scrim")).toBeVisible();
+    await page.mouse.click(355, 400); // tap the scrim area not covered by the drawer
+    await expect(page.locator("#controls")).not.toHaveClass(/open/);
+    // reopen, then Escape
+    await page.locator("#drawerToggle").click();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#controls")).not.toHaveClass(/open/);
+  });
+
+  test("header fits the viewport (no horizontal overflow)", async ({ page }) => {
+    await open(page, "?u=lotr");
+    const hdr = await page.locator("header.topbar").boundingBox();
+    expect(hdr.x + hdr.width).toBeLessThanOrEqual(376);
+    const st = await page.locator("#searchToggle").boundingBox();
+    expect(st.x + st.width).toBeLessThanOrEqual(376);
+  });
+
+  test("detail panel is full-screen (no clipping) on mobile", async ({ page }) => {
+    await open(page, "?u=hp&event=e_battle&t=0.98");
+    const d = await page.locator("#detail").boundingBox();
+    expect(d.width).toBeGreaterThanOrEqual(374); // ~100vw, not 92vw
+  });
+
+  test("mobile search expands and can be dismissed via Escape", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#searchToggle").click();
+    await expect(page.locator("#search")).toHaveClass(/expanded/);
+    await expect(page.locator("#searchInput")).toBeVisible();
+    await page.locator("#searchInput").press("Escape");
+    await expect(page.locator("#search")).not.toHaveClass(/expanded/);
+  });
+
+  test("opening a detail closes the drawer (no stacked panels)", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#drawerToggle").click();
+    await expect(page.locator("#controls")).toHaveClass(/open/);
+    await page.locator("#searchToggle").click();
+    await page.locator("#searchInput").fill("Council");
+    await page.locator("#searchInput").press("Enter");
+    await expect(page.locator("#detail")).toHaveClass(/open/);
+    await expect(page.locator("#controls")).not.toHaveClass(/open/);
+  });
+});
+
+test.describe("desktop layout unchanged by responsive work", () => {
+  test("drawer toggle is hidden on desktop", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await expect(page.locator("#drawerToggle")).toBeHidden();
+    await expect(page.locator("#controls")).toBeVisible();
+  });
+});
+
+test.describe("event-label de-collision", () => {
+  test("the selected event is always labeled, even below importance 5", async ({ page }) => {
+    await open(page, "?u=lotr&event=e_paths&t=0.9"); // e_paths is importance 4
+    await expect(page.locator("#events text", { hasText: "The Paths of the Dead" })).toBeVisible();
+  });
+
+  test("overlapping importance-5 labels are thinned out in a dense view", async ({ page }) => {
+    await open(page, "?u=lotr&t=0.95");
+    // 8 importance-5 events are passed by t=0.95; de-collision must show fewer labels than that
+    const labels = await page.locator("#events text").count();
+    expect(labels).toBeGreaterThan(0);
+    expect(labels).toBeLessThan(8);
+  });
+});
+
 test.describe("boot & health", () => {
   test("boots with no console/page errors and correct title", async ({ page }) => {
     const errors = await open(page);
