@@ -144,3 +144,78 @@ test.describe("robust URL handling", () => {
     await expect(page.locator("#dClose")).not.toBeFocused();
   });
 });
+
+test.describe("expanded cast (2+ extra characters per universe)", () => {
+  for (const [u, expected] of [
+    ["lotr", ["Gandalf", "Samwise Gamgee"]],
+    ["hp", ["Hermione Granger", "Severus Snape"]],
+    ["matrix", ["Morpheus", "Agent Smith"]],
+  ]) {
+    test(`${u} has 4 characters incl. the new pair`, async ({ page }) => {
+      await open(page, `?u=${u}`);
+      await expect(page.locator("#charChips label")).toHaveCount(4);
+      for (const name of expected) {
+        await expect(page.locator("#charChips label", { hasText: name })).toBeVisible();
+      }
+    });
+  }
+
+  test("a new character deep-links and traces a route", async ({ page }) => {
+    await open(page, "?u=lotr&char=gandalf");
+    await expect(page.locator("#detail")).toHaveClass(/open/);
+    await expect(page.locator("#dTitle")).toContainText("Gandalf");
+    expect(await page.locator("#routes polyline").count()).toBeGreaterThan(0);
+  });
+
+  test("new events are searchable", async ({ page }) => {
+    await open(page, "?u=hp");
+    await page.locator("#searchInput").fill("Prince");
+    await expect(page.locator('#searchResults [role="option"]').first()).toContainText("Prince's Tale");
+  });
+});
+
+test.describe("contextual arrival effects", () => {
+  test("selecting an event shows the contextual arrival card (kind + place + context)", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#searchInput").fill("Pelennor");
+    await page.locator("#searchInput").press("Enter");
+    const card = page.locator("#arrivalCard");
+    await expect(card).toHaveClass(/show/);
+    await expect(card.locator("h4")).toContainText("Pelennor");
+    await expect(card.locator(".ac-kind")).toContainText("Minas Tirith"); // tied to the place
+  });
+
+  test("an SVG pulse is emitted into the #fx layer on the map", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#searchInput").fill("Council");
+    await page.locator("#searchInput").press("Enter");
+    expect(await page.locator("#fx > g").count()).toBeGreaterThan(0);
+  });
+
+  test("low-power suppresses the SVG pulse but keeps the contextual card", async ({ page }) => {
+    await open(page, "?u=lotr");
+    await page.locator("#renderToggle").click(); // enter low-power
+    await page.locator("#searchInput").fill("Pelennor");
+    await page.locator("#searchInput").press("Enter");
+    await expect(page.locator("#arrivalCard")).toHaveClass(/show/); // context preserved
+    expect(await page.locator("#fx > g").count()).toBe(0); // motion suppressed
+    // card is still anchored to the pin (not the top-center fallback) even though #fx is display:none
+    const left = await page.locator("#arrivalCard").evaluate((el) => el.style.left);
+    expect(left).not.toBe("50%");
+    expect(left).toMatch(/px$/);
+  });
+});
+
+test.describe("faux-3D depth", () => {
+  test("terrain builds three parallax depth planes", async ({ page }) => {
+    await open(page);
+    await expect(page.locator("#terrain .tdepth")).toHaveCount(3);
+  });
+
+  test("low-power removes the parallax transforms", async ({ page }) => {
+    await open(page);
+    await page.locator("#renderToggle").click();
+    const far = page.locator('#terrain .tdepth[data-depth="0.9"]');
+    expect(await far.getAttribute("transform")).toBeNull();
+  });
+});
