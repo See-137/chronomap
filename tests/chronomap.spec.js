@@ -219,3 +219,58 @@ test.describe("faux-3D depth", () => {
     expect(await far.getAttribute("transform")).toBeNull();
   });
 });
+
+test.describe("shaded-relief terrain", () => {
+  test("landmass is painted with clipped relief (elevation zones + grain), not a flat fill", async ({ page }) => {
+    await open(page, "?u=lotr");
+    // paintLand registers a clipPath and clips the relief overlays to the coastline
+    expect(await page.locator("#terrain clipPath").count()).toBeGreaterThan(0);
+    // elevation-zone ellipses + a grain rect live inside the clipped group
+    expect(await page.locator("#terrain ellipse").count()).toBeGreaterThan(0);
+  });
+
+  test("map furniture: neatline frame + compass are drawn", async ({ page }) => {
+    await open(page, "?u=lotr");
+    // neatline = two framing rects in the near plane; compass has an 'N' label
+    expect(await page.locator('#terrain .tdepth[data-depth="1.1"] rect').count()).toBeGreaterThanOrEqual(2);
+    await expect(page.locator("#terrain text", { hasText: /^N$/ })).toBeVisible();
+  });
+
+  test("low-power strips the .texfx detail layer (grain, snow caps, glows)", async ({ page }) => {
+    await open(page, "?u=lotr");
+    expect(await page.locator("#terrain .texfx").count()).toBeGreaterThan(0);
+    await page.locator("#renderToggle").click();
+    expect(await page.locator("#terrain .texfx").count()).toBe(0);
+    expect(await page.locator("#terrain [filter]").count()).toBe(0);
+  });
+});
+
+test.describe("overview minimap", () => {
+  test("renders the land silhouette and a dot per location", async ({ page }) => {
+    await open(page, "?u=lotr");
+    const d = await page.locator("#mmLand").getAttribute("d");
+    expect(d && d.length).toBeGreaterThan(10); // non-empty land path
+    const dots = await page.locator("#mmDots circle").count();
+    const locs = await page.locator("#locations g").count();
+    expect(dots).toBe(locs);
+  });
+
+  test("the viewport rectangle shrinks as you zoom in", async ({ page }) => {
+    await open(page, "?u=lotr");
+    const w0 = Number(await page.locator("#mmView").getAttribute("width"));
+    await page.locator("#zin").click();
+    await page.waitForTimeout(400);
+    const w1 = Number(await page.locator("#mmView").getAttribute("width"));
+    expect(w1).toBeLessThan(w0);
+  });
+
+  test("clicking the minimap recenters the camera", async ({ page }) => {
+    await open(page, "?u=lotr");
+    const before = await page.locator("#cam").getAttribute("transform");
+    const box = await page.locator("#minimap").boundingBox();
+    await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.5);
+    await page.waitForTimeout(500);
+    const after = await page.locator("#cam").getAttribute("transform");
+    expect(after).not.toEqual(before);
+  });
+});

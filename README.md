@@ -14,9 +14,15 @@ Settings → Pages → Source: Deploy from a branch → `main` / `(root)`).
 
 - **Three worlds, one engine.** A world swap is a theme-token swap, not a layout
   change. Per-universe timelines, terrain, factions, characters, and routes.
-- **Rich, layered maps.** Each world is drawn with mountain ranges (cast shadows),
-  rivers, forests, roads, region labels, and an atmospheric vignette — over three
-  parallax depth planes that shift as you pan for a faux-3D sense of depth.
+- **Shaded-relief maps.** Each landmass is drawn as layered terrain — coastal
+  shallows, hypsometric elevation tints, a directional hillshade, and a parchment
+  grain — with shaded mountain ranges (sunlit/shadow faces + snow), forest canopy
+  masses, tapered river networks, roads, region labels, and map furniture
+  (compass, graticule, neatline frame). Three parallax depth planes shift as you
+  pan for a faux-3D sense of depth.
+- **Overview minimap.** A corner minimap shows the full map extent, every location,
+  and a live viewport rectangle — click or drag it to jump anywhere, so the whole
+  map stays legible at any zoom level.
 - **Four characters per world.** Frodo, Aragorn, Gandalf & Sam; Harry, Voldemort,
   Hermione & Snape; Neo, Trinity, Morpheus & Agent Smith — each with their own
   route and timeline presence.
