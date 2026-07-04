@@ -175,11 +175,26 @@
   .evt-label { font-family:var(--font-ui); font-size:11px; fill:var(--u-text); paint-order:stroke; stroke:var(--u-label-halo); stroke-width:3px; }
   .region-label { font-family:var(--font-serif); font-size:20px; fill:var(--u-secondary); opacity:.28; letter-spacing:3px; text-transform:uppercase; pointer-events:none; }
 
+  /* Location markers: elevate on hover/focus for a tactile 3D feel. */
+  svg.map #locations g { transition:transform .18s cubic-bezier(.2,.8,.2,1); transform-box:fill-box; transform-origin:center; }
+  .reduced svg.map #locations g, .low-power svg.map #locations g { transition:none; }
+  svg.map #locations g:hover, svg.map #locations g:focus-visible { transform:scale(1.18) translateY(-1px); }
+
   /* Atmospheric depth: a soft vignette over the whole stage (Rich tier only). */
   .vignette { position:absolute; inset:0; pointer-events:none; z-index:5;
     background:radial-gradient(120% 90% at 50% 42%, transparent 55%, rgba(0,0,0,.28) 100%);
     opacity:1; transition:opacity .5s; }
   .low-power .vignette, .reduced .vignette { opacity:0; }
+
+  /* Overview minimap — full extent + a live viewport rectangle, click to jump. */
+  .minimap { position:absolute; right:12px; bottom:14px; z-index:12; width:168px; height:118px;
+    background:color-mix(in srgb, var(--u-panel) 88%, transparent); border:1px solid var(--u-secondary);
+    border-radius:10px; box-shadow:var(--shadow); overflow:hidden; cursor:crosshair;
+    transition:opacity .3s, transform .2s; opacity:.92; }
+  .minimap:hover { opacity:1; }
+  .minimap svg { width:100%; height:100%; display:block; }
+  #mmView { transition:none; }
+  @media (max-width:760px){ .minimap { width:118px; height:84px; right:8px; bottom:10px; } }
 
   /* Contextual arrival card — richer than the repeated place name. */
   .arrival-card { position:absolute; z-index:22; min-width:170px; max-width:230px;
@@ -245,6 +260,23 @@
         <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         <radialGradient id="pin" cx="38%" cy="32%" r="75%"><stop offset="0%" stop-color="#fff" stop-opacity=".9"/><stop offset="55%" stop-color="var(--u-map-1)"/><stop offset="100%" stop-color="var(--u-map-2)"/></radialGradient>
         <radialGradient id="atmo" cx="50%" cy="120%" r="90%"><stop offset="0%" stop-color="var(--u-primary)" stop-opacity=".16"/><stop offset="60%" stop-color="var(--u-primary)" stop-opacity="0"/></radialGradient>
+        <!-- Relief & ground treatment: directional hillshade (light from NW), a
+             parchment grain texture, water depth, and elevation tints. -->
+        <linearGradient id="hillshade" x1="0" y1="0" x2="0.8" y2="1">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.20"/>
+          <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.20"/>
+        </linearGradient>
+        <filter id="grain" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.62" numOctaves="3" seed="11" stitchTiles="stitch" result="t"/>
+          <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0"/>
+        </filter>
+        <radialGradient id="lowland" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="var(--u-forest)" stop-opacity="0.16"/><stop offset="100%" stop-color="var(--u-forest)" stop-opacity="0"/></radialGradient>
+        <radialGradient id="upland" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="var(--u-land-stroke)" stop-opacity="0.28"/><stop offset="100%" stop-color="var(--u-land-stroke)" stop-opacity="0"/></radialGradient>
+        <linearGradient id="seaDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--u-water)" stop-opacity="0.0"/><stop offset="100%" stop-color="var(--u-water)" stop-opacity="0.5"/></linearGradient>
+        <linearGradient id="sunface" x1="0" y1="1" x2="0.4" y2="0"><stop offset="0%" stop-color="#000" stop-opacity="0.22"/><stop offset="55%" stop-color="var(--u-land)" stop-opacity="0.0"/><stop offset="100%" stop-color="#fff" stop-opacity="0.28"/></linearGradient>
+        <filter id="softsh" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="1.5" dy="4" stdDeviation="2.5" flood-color="#000" flood-opacity="0.32"/></filter>
+        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="6"/></filter>
       </defs>
       <g id="cam">
         <rect x="-200" y="-200" width="1400" height="1100" fill="url(#mapbg)"/>
@@ -257,6 +289,15 @@
       </g>
     </svg>
     <div class="vignette" id="vignette" aria-hidden="true"></div>
+
+    <div class="minimap" id="minimap" title="Overview — click to jump">
+      <svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="Map overview">
+        <rect x="0" y="0" width="1000" height="700" fill="var(--u-map-2)" opacity="0.5"/>
+        <path id="mmLand" d="" fill="var(--u-land)" stroke="var(--u-land-stroke)" stroke-width="4" opacity="0.85"/>
+        <g id="mmDots"></g>
+        <rect id="mmView" x="0" y="0" width="1000" height="700" fill="none" stroke="var(--u-playhead)" stroke-width="6" rx="10"/>
+      </svg>
+    </div>
 
     <div class="controls" role="group" aria-label="Layers and filters">
       <div class="group" id="layerGroup" hidden>
@@ -363,91 +404,148 @@ function E(tag,attrs){ const e=document.createElementNS(NS,tag); for(const k in 
 function rng(seed){ let s=seed; return ()=> (s=(s*9301+49297)%233280)/233280; }
 const FXMOTION = () => !reduced && !lowPower();   // gate ambient/parallax motion
 
-/* ---- terrain building blocks (shared across worlds) ---- */
-function ridge(layer,x1,x2,base,h,teeth,seed,o={}){
-  const r=rng(seed); let d=`M${x1},${base}`;
-  const step=(x2-x1)/teeth;
-  for(let i=0;i<teeth;i++){ const px=x1+step*(i+.5), py=base-h*(.55+r()*.7), nx=x1+step*(i+1); d+=` L${px.toFixed(1)},${py.toFixed(1)} L${nx.toFixed(1)},${base}`; }
-  d+=" Z";
-  layer.appendChild(E("path",{d, fill:o.fill||"var(--u-land-stroke)", opacity:o.opacity??.5, filter:"url(#elev)"}));
-  layer.appendChild(E("path",{d, fill:"none", stroke:o.cap||"var(--u-label-halo)", "stroke-width":.8, opacity:.28})); // light ridge line
+/* ---- shaded-relief map engine (shared across worlds) ----
+   Goal: land reads as layered terrain (coast → lowland → upland → peaks),
+   not a flat fill. Everything decorative that hurts the low-power tier is
+   tagged .texfx (removed) or uses a [filter] (stripped) in buildTerrain(). */
+let _clip=0, LAND_PATH=null;   // LAND_PATH: current landmass silhouette for the minimap
+function spineline(pts,spacing){ const out=[]; for(let i=0;i<pts.length-1;i++){ const [x1,y1]=pts[i],[x2,y2]=pts[i+1]; const d=Math.hypot(x2-x1,y2-y1), n=Math.max(1,Math.round(d/spacing)); for(let s=0;s<n;s++){ const f=s/n; out.push([x1+(x2-x1)*f,y1+(y2-y1)*f]); } } out.push(pts[pts.length-1]); return out; }
+// Paint a believable landmass: cast shadow, shallows halo, base fill, then
+// clipped relief (elevation tints + hillshade + parchment grain).
+function paintLand(L,d,o={}){
+  LAND_PATH=d;
+  const id="lc"+(_clip++), cp=E("clipPath",{id}); cp.appendChild(E("path",{d})); L.far.appendChild(cp);
+  for(let i=4;i>=1;i--) L.far.appendChild(E("path",{d, fill:"none", stroke:"var(--u-water)","stroke-width":6*i, opacity:.05*i, "stroke-linejoin":"round", class:"texfx"})); // coastal shallows
+  L.far.appendChild(E("path",{d, fill:"#000", opacity:.20, transform:"translate(7,10)"}));   // landmass cast shadow (depth)
+  L.mid.appendChild(E("path",{d, fill:"var(--u-land)", stroke:"var(--u-land-stroke)","stroke-width":2.4, filter:"url(#rough)"}));
+  const g=E("g",{"clip-path":`url(#${id})`}); L.mid.appendChild(g);
+  (o.zones||[]).forEach(z=> g.appendChild(E("ellipse",{cx:z[0],cy:z[1],rx:z[2],ry:z[3], fill:`url(#${z[4]||"upland"})`})));
+  g.appendChild(E("rect",{x:-200,y:-200,width:1400,height:1100, fill:"url(#hillshade)"}));       // directional light
+  g.appendChild(E("rect",{x:-200,y:-200,width:1400,height:1100, fill:"#fff", filter:"url(#grain)", opacity:.55, class:"texfx"})); // parchment grain
+  return id;
 }
-function forest(layer,cx,cy,rad,n,seed,col){
-  const r=rng(seed);
-  for(let i=0;i<n;i++){ const a=r()*6.28,dd=Math.sqrt(r())*rad, x=cx+Math.cos(a)*dd, y=cy+Math.sin(a)*dd, s=1.6+r()*1.4;
-    layer.appendChild(E("path",{d:`M${x.toFixed(1)},${(y+s).toFixed(1)} L${(x-s).toFixed(1)},${(y+s).toFixed(1)} L${x.toFixed(1)},${(y-s*1.6).toFixed(1)} L${(x+s).toFixed(1)},${(y+s).toFixed(1)} Z`, fill:col||"var(--u-forest)", opacity:.42+r()*.2})); }
+// Shaded mountain range along a spine polyline: overlapping peaks with sunlit /
+// shadow faces + soft cast shadow, drawn front-to-back for depth.
+function range(layer,ctrl,o={}){
+  const spine=spineline(ctrl,o.spacing||13).sort((a,b)=>a[1]-b[1]), r=rng(o.seed||3), w=o.w||16, H=o.h||30;
+  for(const [x,y] of spine){ const ph=H*(.65+r()*.7);
+    layer.appendChild(E("path",{d:`M${(x-w).toFixed(1)},${y.toFixed(1)} L${x.toFixed(1)},${(y-ph).toFixed(1)} L${(x+w).toFixed(1)},${y.toFixed(1)} Z`, fill:o.fill||"var(--u-land-stroke)", opacity:o.opacity??.75, filter:"url(#softsh)"}));
+    layer.appendChild(E("path",{d:`M${(x-w).toFixed(1)},${y.toFixed(1)} L${x.toFixed(1)},${(y-ph).toFixed(1)} L${x.toFixed(1)},${(y-ph*.45).toFixed(1)} Z`, fill:"#fff", opacity:.17, class:"texfx"}));   // sunlit face
+    layer.appendChild(E("path",{d:`M${x.toFixed(1)},${(y-ph).toFixed(1)} L${(x+w).toFixed(1)},${y.toFixed(1)} L${x.toFixed(1)},${(y-ph*.45).toFixed(1)} Z`, fill:"#000", opacity:.16, class:"texfx"})); // shadow face
+    if(o.snow) layer.appendChild(E("path",{d:`M${(x-4).toFixed(1)},${(y-ph+7).toFixed(1)} L${x.toFixed(1)},${(y-ph).toFixed(1)} L${(x+4).toFixed(1)},${(y-ph+7).toFixed(1)}`, fill:"none", stroke:"var(--u-label-halo)","stroke-width":1.3, opacity:.55, class:"texfx"}));
+  }
 }
-function road(layer,pts,o={}){ layer.appendChild(E("path",{d:"M"+pts.map(p=>p.join(",")).join(" L "), fill:"none", stroke:o.stroke||"var(--u-secondary)", "stroke-width":o.w||1.4, "stroke-dasharray":o.dash||"5 6", opacity:o.opacity??.35, "stroke-linecap":"round", "stroke-linejoin":"round"})); }
-function region(layer,x,y,txt){ const t=E("text",{x,y,class:"region-label","text-anchor":"middle"}); t.textContent=txt; layer.appendChild(t); }
+// Forest as a canopy MASS: soft base blob + layered tree glyphs (denser centre).
+function canopy(layer,cx,cy,rx,ry,n,seed,col){
+  const r=rng(seed), c=col||"var(--u-forest)";
+  layer.appendChild(E("ellipse",{cx,cy,rx,ry, fill:c, opacity:.17, filter:"url(#soft)"}));
+  layer.appendChild(E("ellipse",{cx,cy,rx:rx*.9,ry:ry*.9, fill:c, opacity:.1}));
+  for(let i=0;i<n;i++){ const a=r()*6.28,dd=Math.sqrt(r()), x=cx+Math.cos(a)*dd*rx, y=cy+Math.sin(a)*dd*ry, s=1.5+r()*1.9;
+    layer.appendChild(E("path",{d:`M${x.toFixed(1)},${(y+s).toFixed(1)} L${(x-s).toFixed(1)},${(y+s).toFixed(1)} L${x.toFixed(1)},${(y-s*1.7).toFixed(1)} L${(x+s).toFixed(1)},${(y+s).toFixed(1)} Z`, fill:c, opacity:.4+r()*.3})); }
+}
+// Tapered river with a light glint.
+function river(layer,pts,o={}){ const dd="M"+pts.map(p=>p.join(",")).join(" L "), w=o.w||5;
+  layer.appendChild(E("path",{d:dd, fill:"none", stroke:"var(--u-water)","stroke-width":w, opacity:.55, "stroke-linecap":"round","stroke-linejoin":"round"}));
+  layer.appendChild(E("path",{d:dd, fill:"none", stroke:"#fff","stroke-width":w*.28, opacity:.22, "stroke-linecap":"round", class:"texfx"})); }
+// Scattered ground texture over a rect: grass tufts / dunes / rubble.
+function stipple(layer,x0,y0,x1,y1,n,seed,o={}){ const r=rng(seed), c=o.col||"var(--u-secondary)";
+  for(let i=0;i<n;i++){ const x=x0+r()*(x1-x0), y=y0+r()*(y1-y0);
+    layer.appendChild(E("path",{d:o.dune?`M${(x-3).toFixed(1)},${y.toFixed(1)} q3,-2.4 6,0`:`M${x.toFixed(1)},${y.toFixed(1)} l1.4,-3`, fill:"none", stroke:c,"stroke-width":.8, opacity:o.opacity??.2, class:"texfx"})); } }
+function road(layer,pts,o={}){ layer.appendChild(E("path",{d:"M"+pts.map(p=>p.join(",")).join(" L "), fill:"none", stroke:o.stroke||"var(--u-secondary)", "stroke-width":o.w||1.4, "stroke-dasharray":o.dash||"5 6", opacity:o.opacity??.4, "stroke-linecap":"round", "stroke-linejoin":"round"})); }
+function region(layer,x,y,txt,o={}){ const t=E("text",{x,y,class:"region-label","text-anchor":"middle"}); if(o.size)t.setAttribute("font-size",o.size); t.textContent=txt; layer.appendChild(t); }
+// map furniture — orientation & framing (drawn for every world in buildTerrain)
+function graticule(layer){ for(let x=100;x<1000;x+=100) layer.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-line)","stroke-width":.5, opacity:.06, class:"texfx"})); for(let y=100;y<700;y+=100) layer.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-line)","stroke-width":.5, opacity:.06, class:"texfx"})); }
+function neatline(layer){ layer.appendChild(E("rect",{x:10,y:10,width:980,height:680, fill:"none", stroke:"var(--u-secondary)","stroke-width":2.5, opacity:.55, rx:5})); layer.appendChild(E("rect",{x:16,y:16,width:968,height:668, fill:"none", stroke:"var(--u-secondary)","stroke-width":.8, opacity:.4, rx:3})); }
+function compass(layer,x,y,rad){ const g=E("g",{transform:`translate(${x},${y})`, opacity:.6, class:"texfx"});
+  g.appendChild(E("circle",{r:rad, fill:"none", stroke:"var(--u-secondary)","stroke-width":1}));
+  g.appendChild(E("circle",{r:rad-4, fill:"none", stroke:"var(--u-secondary)","stroke-width":.5, opacity:.6}));
+  g.appendChild(E("path",{d:`M0,${-rad+2} L5,0 L0,6 L-5,0 Z`, fill:"var(--u-primary)"}));           // N needle
+  g.appendChild(E("path",{d:`M0,${rad-2} L5,0 L0,-6 L-5,0 Z`, fill:"var(--u-secondary)", opacity:.6}));
+  const n=E("text",{x:0,y:-rad-4,"text-anchor":"middle","font-size":11,fill:"var(--u-secondary)","font-family":"var(--font-serif)"}); n.textContent="N"; g.appendChild(n);
+  layer.appendChild(g); }
 
 const TERRAIN = {
   lotr({far,mid,near}){
-    // far — hazy distant ranges + drop-shadowed coastline
-    far.appendChild(E("path",{d:"M76,128 C 206,66 384,86 524,116 C 704,146 866,186 906,306 C 946,426 886,566 724,606 C 524,656 302,646 182,566 C 62,486 44,306 76,128 Z", fill:"#000", opacity:.16, transform:"translate(5,8)"}));
-    ridge(far,120,360,150,26,7,21,{opacity:.22});
-    // mid — main landmass, rivers, mountains, forests, roads, regions
-    mid.appendChild(E("path",{d:"M70,120 C 200,60 380,80 520,110 C 700,140 860,180 900,300 C 940,420 880,560 720,600 C 520,650 300,640 180,560 C 60,480 40,300 70,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
-    // Anduin + tributaries
-    mid.appendChild(E("path",{d:"M470,150 C 520,240 540,330 560,400 C 580,470 585,520 600,565", fill:"none", stroke:"var(--u-water)", "stroke-width":4.5, opacity:.55, "stroke-linecap":"round"}));
-    mid.appendChild(E("path",{d:"M470,150 C 430,210 405,250 400,300", fill:"none", stroke:"var(--u-water)", "stroke-width":2, opacity:.4}));
-    mid.appendChild(E("path",{d:"M560,400 C 620,410 660,430 700,470", fill:"none", stroke:"var(--u-water)", "stroke-width":2, opacity:.4}));
-    // Misty Mountains (N–S spine) + White Mountains (E–W, Gondor/Rohan)
-    ridge(mid,430,470,340,40,9,7,{fill:"var(--u-land-stroke)",opacity:.6});
-    ridge(mid,470,660,470,30,11,8,{fill:"var(--u-land-stroke)",opacity:.55});
-    // Mordor plateau — jagged, menacing
-    mid.appendChild(E("path",{d:"M690,325 C 790,312 872,352 878,432 C 883,498 822,528 740,510 C 686,498 664,432 690,325 Z", fill:"url(#dangerG)", opacity:.4, stroke:"var(--u-danger)", "stroke-width":1, "stroke-dasharray":"3 4"}));
-    forest(mid,505,285,30,44,71,"var(--u-forest)");   // Lothlórien
-    forest(mid,430,352,24,30,72);                       // Fangorn
-    forest(mid,300,300,20,26,73);                       // Old Forest / Eriador wood
-    road(mid,[[120,210],[225,220],[305,190],[390,165]],{}); // the road east to Rivendell
-    road(mid,[[390,165],[455,250],[505,280]],{});
-    region(mid,220,150,"Eriador"); region(mid,470,540,"Rohan"); region(mid,610,590,"Gondor"); region(mid,790,470,"Mordor");
-    // near — foreground hachures/trees
-    near.appendChild(E("path",{d:"M690,330 C 780,320 860,360 870,430 C 875,490 820,520 740,505", fill:"none", stroke:"var(--u-danger)", "stroke-width":.8, opacity:.3}));
-    forest(near,540,470,14,10,74);
+    // Middle-earth — west coast + Bay of Belfalas south, framed by mountains.
+    paintLand({far,mid,near},"M60,150 C 150,70 300,70 430,96 C 560,120 690,120 812,150 C 908,174 946,270 918,360 C 892,446 928,520 858,566 C 780,616 690,566 612,600 C 548,628 470,606 402,628 C 300,660 190,636 128,560 C 66,486 40,372 52,286 C 60,224 44,196 60,150 Z",
+      {zones:[[300,300,180,150,"lowland"],[470,470,150,120,"lowland"],[470,300,120,150,"upland"],[790,410,120,120,"upland"]]});
+    // Rivers — Anduin (main) + Entwash & Gwathló tributaries, delta at the bay.
+    river(mid,[[470,150],[500,240],[520,330],[545,410],[575,480],[600,560],[615,600]],{w:6});
+    river(mid,[[520,330],[470,360],[430,400]],{w:2.6});   // Entwash into Rohan
+    river(mid,[[300,300],[230,360],[170,430]],{w:2.4});   // Gwathló west
+    // Plains texture (Rohan grassland) + Eriador moor
+    stipple(mid,400,430,600,560,120,51,{col:"var(--u-forest)",opacity:.16});
+    stipple(mid,150,230,330,360,80,52,{col:"var(--u-secondary)",opacity:.13});
+    // Mountain ranges — Misty (N–S), White (E–W), Ered Lithui/Ephel Dúath (Mordor frame)
+    range(mid,[[452,150],[460,240],[468,330],[474,410]],{h:34,w:15,snow:true,seed:7});
+    range(mid,[[420,472],[510,478],[600,472],[688,466]],{h:30,w:15,snow:true,seed:8});
+    range(mid,[[672,318],[740,300],[810,306],[878,340]],{h:22,w:13,fill:"var(--u-danger)",opacity:.5,seed:9}); // Ered Lithui
+    range(mid,[[690,470],[740,500],[800,500],[860,470]],{h:20,w:12,fill:"var(--u-danger)",opacity:.5,seed:10}); // Ephel Dúath
+    // Mordor plateau + lava field + Mount Doom
+    mid.appendChild(E("path",{d:"M700,340 C 800,326 866,360 872,432 C 877,494 820,516 744,502 C 694,492 676,432 700,340 Z", fill:"url(#dangerG)", opacity:.42}));
+    stipple(mid,710,360,860,480,50,53,{col:"var(--u-danger)",opacity:.3});
+    mid.appendChild(E("circle",{cx:800,cy:400,r:20, fill:"url(#dangerG)", filter:"url(#glow)"}));
+    mid.appendChild(E("circle",{cx:800,cy:400,r:9, fill:"var(--u-danger)", opacity:.9}));
+    // Forests — Mirkwood (large), Lothlórien, Fangorn, Old Forest
+    canopy(mid,610,235,58,74,120,71,"var(--u-forest)");   // Mirkwood
+    canopy(mid,512,300,30,30,44,72,"var(--u-forest)");    // Lothlórien
+    canopy(mid,432,356,26,26,34,73);                       // Fangorn
+    canopy(mid,290,300,26,22,32,74);                       // Old Forest
+    // Roads — the Great East Road & the road south to Gondor
+    road(mid,[[128,214],[225,220],[305,192],[392,166]],{});
+    road(mid,[[392,166],[456,252],[510,286]],{});
+    road(mid,[[470,432],[540,470],[600,516],[600,560]],{dash:"3 7",opacity:.3});
+    region(mid,210,180,"Eriador"); region(mid,560,180,"Rhovanion",{size:16}); region(mid,470,548,"Rohan"); region(mid,612,592,"Gondor"); region(mid,792,462,"Mordor");
   },
   hp({far,mid,near}){
-    // far — sea haze + shadow coastline
-    far.appendChild(E("path",{d:"M436,124 C 476,114 504,144 509,194 C 514,244 484,274 504,324 C 524,364 564,374 564,424 C 564,474 544,524 504,564 C 454,604 384,604 364,544 C 349,504 384,474 379,434 C 374,394 344,384 354,334 C 364,294 404,294 409,254 C 414,214 404,154 436,124 Z", fill:"#000", opacity:.14, transform:"translate(4,7)"}));
-    const rs=rng(19); for(let i=0;i<26;i++){ const x=rs()*1000, y=rs()*700; far.appendChild(E("path",{d:`M${x},${y} q 8,-4 16,0`, fill:"none", stroke:"var(--u-water)", "stroke-width":.8, opacity:.12})); } // sea shimmer
-    // mid — Britain, Thames, Highlands, Forbidden Forest, Hogwarts Express line
-    mid.appendChild(E("path",{d:"M430,120 C 470,110 500,140 505,190 C 510,240 480,270 500,320 C 520,360 560,370 560,420 C 560,470 540,520 500,560 C 450,600 380,600 360,540 C 345,500 380,470 375,430 C 370,390 340,380 350,330 C 360,290 400,290 405,250 C 410,210 400,150 430,120 Z", fill:"var(--u-land)", stroke:"var(--u-land-stroke)", "stroke-width":2, filter:"url(#rough)"}));
-    mid.appendChild(E("path",{d:"M470,300 C 500,360 520,420 545,525", fill:"none", stroke:"var(--u-water)", "stroke-width":3, opacity:.5, "stroke-linecap":"round"})); // river
-    mid.appendChild(E("path",{d:"M508,540 C 528,536 548,540 560,548", fill:"none", stroke:"var(--u-water)", "stroke-width":2.4, opacity:.45})); // Thames estuary
-    ridge(mid,405,505,205,26,9,31,{opacity:.5});  // Scottish Highlands
-    forest(mid,462,232,26,40,33,"var(--u-forest)"); // Forbidden Forest
-    road(mid,[[540,520],[520,470],[500,400],[485,320],[478,255],[470,205]],{stroke:"var(--u-line)",w:1.6,dash:"2 7",opacity:.5}); // Hogwarts Express
-    region(mid,455,150,"Highlands"); region(mid,556,560,"London"); region(mid,392,590,"West Country");
-    near.appendChild(E("path",{d:"M410,150 q 24,-8 48,0 M414,170 q 24,-8 48,0", fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.35}));
-    forest(near,430,500,12,8,34);
+    // Stylized Britain — narrow Highlands north, broad south, Irish Sea west.
+    paintLand({far,mid,near},"M436,110 C 480,100 512,132 516,186 C 520,236 490,266 512,318 C 532,360 574,372 574,424 C 574,478 552,532 508,574 C 456,618 378,616 356,552 C 340,508 378,478 372,436 C 366,394 336,384 348,332 C 360,288 404,290 410,248 C 416,206 402,140 436,110 Z",
+      {zones:[[452,470,120,120,"lowland"],[440,200,90,120,"upland"]]});
+    river(mid,[[470,300],[500,360],[522,430],[545,530]],{w:4});      // river south
+    river(mid,[[510,540],[540,536],[566,548]],{w:2.6});              // Thames estuary
+    river(mid,[[452,470],[420,500],[400,540]],{w:2.2});              // Severn
+    stipple(mid,380,430,540,560,90,61,{col:"var(--u-forest)",opacity:.15}); // English lowland
+    range(mid,[[420,170],[456,196],[496,182],[512,210]],{h:26,w:14,snow:true,seed:31}); // Highlands
+    canopy(mid,460,236,30,26,48,33,"var(--u-forest)");   // Forbidden Forest
+    canopy(mid,414,486,20,16,22,35);                      // Forest of Dean
+    road(mid,[[540,520],[522,470],[502,400],[486,320],[478,254],[470,206]],{stroke:"var(--u-line)",w:1.8,dash:"2 7",opacity:.55}); // Hogwarts Express
+    region(mid,452,150,"Highlands"); region(mid,470,330,"The Midlands",{size:14}); region(mid,558,556,"London"); region(mid,388,588,"West Country");
+    near.appendChild(E("path",{d:"M300,110 q10,-4 20,0 M840,150 q10,-4 20,0 M760,560 q10,-4 20,0", fill:"none", stroke:"var(--u-water)","stroke-width":1, opacity:.2, class:"texfx"}));
   },
   matrix({far,mid,near}, layer){
     if(layer==="sim"){
-      for(let x=0;x<=1000;x+=50) far.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.08}));
-      for(let y=0;y<=700;y+=50) far.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)", "stroke-width":.5, opacity:.08}));
-      // mid — brighter grid, city blocks (skyline), glowing nodes
-      for(let x=0;x<=1000;x+=100) mid.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-primary)", "stroke-width":.5, opacity:.14}));
-      for(let y=0;y<=700;y+=100) mid.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-primary)", "stroke-width":.5, opacity:.14}));
+      // Deep base grid (far) + bright working grid (mid) — a city in code.
+      for(let x=0;x<=1000;x+=50) far.appendChild(E("line",{x1:x,y1:0,x2:x,y2:700, stroke:"var(--u-forest)","stroke-width":.5, opacity:.07, class:"texfx"}));
+      for(let y=0;y<=700;y+=50) far.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-forest)","stroke-width":.5, opacity:.07, class:"texfx"}));
+      // ground plane glow + perspective streets converging to a vanishing point
+      mid.appendChild(E("rect",{x:0,y:470,width:1000,height:230, fill:"url(#seaDepth)", opacity:.5}));
+      for(let i=-6;i<=6;i++){ mid.appendChild(E("line",{x1:500+i*24,y1:470,x2:500+i*150,y2:700, stroke:"var(--u-primary)","stroke-width":.6, opacity:.14, class:"texfx"})); }
+      for(let i=1;i<=5;i++){ const y=470+i*i*7; mid.appendChild(E("line",{x1:0,y1:y,x2:1000,y2:y, stroke:"var(--u-primary)","stroke-width":.6, opacity:.12, class:"texfx"})); }
       const r=rng(11);
-      for(let i=0;i<18;i++){ const bx=r()*940+10, bw=18+r()*34, bh=40+r()*120; mid.appendChild(E("rect",{x:bx.toFixed(1),y:(560-bh).toFixed(1),width:bw.toFixed(1),height:bh.toFixed(1), fill:"none", stroke:"var(--u-primary)", "stroke-width":.7, opacity:.16})); }
-      for(let i=0;i<70;i++){ mid.appendChild(E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:(r()*1.6+.4).toFixed(2), fill:"var(--u-primary)", opacity:r()*.5+.1, filter:"url(#glow)"})); }
-      // near — falling code rain (animated on capable tier)
-      for(let i=0;i<14;i++){ const x=r()*1000, y=r()*400; const ln=E("line",{x1:x.toFixed(1),y1:y.toFixed(1),x2:x.toFixed(1),y2:(y+90).toFixed(1), stroke:"var(--u-primary)", "stroke-width":1, opacity:.16});
+      // city skyline — layered building blocks with lit windows
+      for(let i=0;i<26;i++){ const bx=r()*960+8, bw=16+r()*40, bh=50+r()*150, by=470-bh;
+        mid.appendChild(E("rect",{x:bx.toFixed(1),y:by.toFixed(1),width:bw.toFixed(1),height:bh.toFixed(1), fill:"var(--u-primary)", opacity:.05, stroke:"var(--u-primary)","stroke-width":.7, "stroke-opacity":.22}));
+        for(let w=0;w<Math.floor(bh/14);w++){ if(r()>.6) mid.appendChild(E("rect",{x:(bx+4+ (r()>.5?bw-8:0)).toFixed(1), y:(by+6+w*14).toFixed(1), width:2.5, height:2.5, fill:"var(--u-primary)", opacity:(.2+r()*.5).toFixed(2), class:"texfx"})); } }
+      for(let i=0;i<60;i++){ mid.appendChild(E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*460).toFixed(1), r:(r()*1.6+.4).toFixed(2), fill:"var(--u-primary)", opacity:r()*.5+.1, filter:"url(#glow)", class:"texfx"})); }
+      for(let i=0;i<16;i++){ const x=r()*1000, y=r()*380; const ln=E("line",{x1:x.toFixed(1),y1:y.toFixed(1),x2:x.toFixed(1),y2:(y+90).toFixed(1), stroke:"var(--u-primary)","stroke-width":1, opacity:.16, class:"texfx"});
         if(FXMOTION()){ const dur=(2.4+r()*3).toFixed(2)+"s"; ln.appendChild(E("animateTransform",{attributeName:"transform",type:"translate",from:"0 -160",to:"0 760",dur,repeatCount:"indefinite",begin:(-r()*4).toFixed(2)+"s"})); }
         near.appendChild(ln); }
+      region(mid,500,60,"The Simulation",{size:15});
     } else {
       const r=rng(5);
-      // far — cavern strata haze
-      for(let i=0;i<6;i++){ const y=90+i*100; far.appendChild(E("path",{d:`M0,${y} Q 500,${y-30} 1000,${y}`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.12})); }
-      // mid — tunnels converge on Machine City; Zion cavern
-      for(let i=0;i<9;i++){ const sx=r()*320+70, sy=r()*520+110; mid.appendChild(E("path",{d:`M${sx.toFixed(0)},${sy.toFixed(0)} Q ${((sx+820)/2).toFixed(0)},${((sy+300)/2+(r()*140-70)).toFixed(0)} 820,300`, fill:"none", stroke:"var(--u-secondary)", "stroke-width":1, opacity:.28})); }
-      mid.appendChild(E("circle",{cx:300,cy:560,r:70, fill:"none", stroke:"var(--u-forest)", "stroke-width":1, opacity:.3})); // Zion cavern
-      mid.appendChild(E("circle",{cx:300,cy:560,r:44, fill:"var(--u-forest)", opacity:.06}));
-      mid.appendChild(E("circle",{cx:820,cy:300,r:64, fill:"none", stroke:"var(--u-danger)", "stroke-width":1, opacity:.32, filter:"url(#glow)"}));
-      mid.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.4}));
-      region(mid,300,470,"Zion"); region(mid,820,210,"01");
-      // near — sentinel specks / dust
-      for(let i=0;i<50;i++){ const c=E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:.7, fill:"var(--u-danger)", opacity:.2+r()*.2});
+      // Real world — a dark cavern: rock strata, tunnels, Zion, Machine City.
+      for(let i=0;i<8;i++){ const y=70+i*90; far.appendChild(E("path",{d:`M0,${y} Q 500,${y-34} 1000,${y}`, fill:"none", stroke:"var(--u-secondary)","stroke-width":1, opacity:.12, class:"texfx"})); }
+      for(let i=0;i<160;i++){ far.appendChild(E("circle",{cx:(r()*1000).toFixed(1),cy:(r()*700).toFixed(1),r:(r()*.8+.2).toFixed(2), fill:"var(--u-secondary)", opacity:(.06+r()*.1).toFixed(2), class:"texfx"})); } // rock grain
+      for(let i=0;i<11;i++){ const sx=r()*340+60, sy=r()*540+90; mid.appendChild(E("path",{d:`M${sx.toFixed(0)},${sy.toFixed(0)} Q ${((sx+820)/2).toFixed(0)},${((sy+300)/2+(r()*150-75)).toFixed(0)} 820,300`, fill:"none", stroke:"var(--u-secondary)","stroke-width":1, opacity:.26, class:"texfx"})); }
+      // Zion — concentric cavern city
+      for(let i=4;i>=1;i--) mid.appendChild(E("circle",{cx:300,cy:560,r:22*i, fill:"none", stroke:"var(--u-forest)","stroke-width":1, opacity:.1*i, class:"texfx"}));
+      mid.appendChild(E("circle",{cx:300,cy:560,r:30, fill:"var(--u-forest)", opacity:.08}));
+      // Machine City — burning heart
+      mid.appendChild(E("circle",{cx:820,cy:300,r:80, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.26, filter:"url(#glow)"}));
+      mid.appendChild(E("circle",{cx:820,cy:300,r:60, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.3}));
+      mid.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.45}));
+      region(mid,300,466,"Zion"); region(mid,820,196,"01 · Machine City",{size:13});
+      for(let i=0;i<50;i++){ const c=E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:.7, fill:"var(--u-danger)", opacity:.2+r()*.2, class:"texfx"});
         if(FXMOTION() && r()>.7){ c.appendChild(E("animate",{attributeName:"opacity",values:"0.1;0.5;0.1",dur:(1.5+r()*2).toFixed(2)+"s",repeatCount:"indefinite"})); }
         near.appendChild(c); }
     }
@@ -714,14 +812,21 @@ const camG=el("cam"), gTerrain=el("terrain"), gRoutes=el("routes"), gLoc=el("loc
    RENDER
    ===================================================================== */
 function buildTerrain(){
-  gTerrain.innerHTML="";
+  gTerrain.innerHTML=""; LAND_PATH=null;
   // Three parallax depth planes: far (distant, moves least), mid (where the
   // locations live), near (foreground, moves most). See applyCam() for the offset.
   const far=E("g",{class:"tdepth","data-depth":"0.9"}), mid=E("g",{class:"tdepth","data-depth":"1"}), near=E("g",{class:"tdepth","data-depth":"1.1"});
   gTerrain.append(far,mid,near);
+  if(state.universe!=="matrix") graticule(far);          // Matrix has its own grid
   TERRAIN[state.universe]({far,mid,near}, state.layer);
-  // Low-power tier: drop the GPU-heavy SVG turbulence/displacement + elevation filters.
-  if(lowPower()) gTerrain.querySelectorAll("[filter]").forEach(n=>n.removeAttribute("filter"));
+  neatline(near); compass(near, 922, 108, 30);           // map framing + orientation
+  // Low-power / reduced-effects tier: strip GPU filters AND the .texfx detail
+  // layer (grain, hachures, snow caps, glows) so the map stays cheap but legible.
+  if(lowPower()){
+    gTerrain.querySelectorAll("[filter]").forEach(n=>n.removeAttribute("filter"));
+    gTerrain.querySelectorAll(".texfx").forEach(n=>n.remove());
+  }
+  renderMinimap();
 }
 
 function buildLocations(){
@@ -807,7 +912,38 @@ function applyCam(){
     const px=(state.cam.x-.5), py=(state.cam.y-.5);
     planes.forEach(g=>{ const k=(parseFloat(g.dataset.depth)||1)-1; g.setAttribute("transform",`translate(${(-px*1000*k*.5).toFixed(1)},${(-py*700*k*.5).toFixed(1)})`); });
   } else planes.forEach(g=>g.removeAttribute("transform"));
+  updateMinimapViewport();
 }
+
+/* ---- minimap ---- */
+function renderMinimap(){
+  el("mmLand").setAttribute("d", LAND_PATH || "");                 // land silhouette (empty for Matrix)
+  const dots=el("mmDots"); dots.innerHTML="";
+  U().locations.filter(l=>l.layer===state.layer).forEach(l=>{
+    const fac=byId(U().factions,l.faction);
+    dots.appendChild(E("circle",{cx:l.x,cy:l.y,r:9,fill:fac?fac.color:"var(--u-line)",opacity:.85}));
+  });
+  updateMinimapViewport();
+}
+function updateMinimapViewport(){
+  const v=el("mmView"); if(!v) return;
+  const z=state.cam.z, cx=state.cam.x*1000, cy=state.cam.y*700;   // visible window in map coords
+  v.setAttribute("x",(cx-500/z).toFixed(1)); v.setAttribute("y",(cy-350/z).toFixed(1));
+  v.setAttribute("width",(1000/z).toFixed(1)); v.setAttribute("height",(700/z).toFixed(1));
+}
+// click/drag the minimap to recenter the camera
+(function(){
+  const mm=el("minimap"), svg=mm.querySelector("svg");
+  function jump(e){
+    const r=svg.getBoundingClientRect();
+    const mx=clamp((e.clientX-r.left)/r.width,0,1), my=clamp((e.clientY-r.top)/r.height,0,1);
+    flyTo(mx,my,Math.max(state.cam.z,1.6));
+  }
+  let mmDrag=false;
+  mm.addEventListener("pointerdown",e=>{ mmDrag=true; mm.setPointerCapture(e.pointerId); jump(e); });
+  mm.addEventListener("pointermove",e=>{ if(mmDrag) jump(e); });
+  mm.addEventListener("pointerup",()=>{ mmDrag=false; });
+})();
 function flyTo(nx,ny,nz,cb){
   const from={...state.cam}, to={x:nx,y:ny,z:nz};
   if(reduced || lowPower()){ state.cam=to; applyCam(); writeURL(); cb&&cb(); return; }  // no easing in reduced/low-power
