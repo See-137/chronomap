@@ -415,7 +415,9 @@ function spineline(pts,spacing){ const out=[]; for(let i=0;i<pts.length-1;i++){ 
 function paintLand(L,d,o={}){
   LAND_PATH=d;
   const id="lc"+(_clip++), cp=E("clipPath",{id}); cp.appendChild(E("path",{d})); L.far.appendChild(cp);
-  for(let i=4;i>=1;i--) L.far.appendChild(E("path",{d, fill:"none", stroke:"var(--u-water)","stroke-width":6*i, opacity:.05*i, "stroke-linejoin":"round", class:"texfx"})); // coastal shallows
+  for(let i=4;i>=1;i--){ const base=.05*i, ring=E("path",{d, fill:"none", stroke:"var(--u-water)","stroke-width":6*i, opacity:base, "stroke-linejoin":"round", class:"texfx"}); // coastal shallows
+    if(FXMOTION()) ring.appendChild(E("animate",{attributeName:"opacity", values:`${base};${(base*1.9).toFixed(3)};${base}`, dur:(4+i*.8).toFixed(1)+"s", begin:(-i*.9).toFixed(1)+"s", repeatCount:"indefinite"})); // tide shimmer
+    L.far.appendChild(ring); }
   L.far.appendChild(E("path",{d, fill:"#000", opacity:.20, transform:"translate(7,10)"}));   // landmass cast shadow (depth)
   L.mid.appendChild(E("path",{d, fill:"var(--u-land)", stroke:"var(--u-land-stroke)","stroke-width":2.4, filter:"url(#rough)"}));
   const g=E("g",{"clip-path":`url(#${id})`}); L.mid.appendChild(g);
@@ -443,10 +445,12 @@ function canopy(layer,cx,cy,rx,ry,n,seed,col){
   for(let i=0;i<n;i++){ const a=r()*6.28,dd=Math.sqrt(r()), x=cx+Math.cos(a)*dd*rx, y=cy+Math.sin(a)*dd*ry, s=1.5+r()*1.9;
     layer.appendChild(E("path",{d:`M${x.toFixed(1)},${(y+s).toFixed(1)} L${(x-s).toFixed(1)},${(y+s).toFixed(1)} L${x.toFixed(1)},${(y-s*1.7).toFixed(1)} L${(x+s).toFixed(1)},${(y+s).toFixed(1)} Z`, fill:c, opacity:.4+r()*.3})); }
 }
-// Tapered river with a light glint.
+// Tapered river with a light glint that shimmers on the capable tier.
 function river(layer,pts,o={}){ const dd="M"+pts.map(p=>p.join(",")).join(" L "), w=o.w||5;
   layer.appendChild(E("path",{d:dd, fill:"none", stroke:"var(--u-water)","stroke-width":w, opacity:.55, "stroke-linecap":"round","stroke-linejoin":"round"}));
-  layer.appendChild(E("path",{d:dd, fill:"none", stroke:"#fff","stroke-width":w*.28, opacity:.22, "stroke-linecap":"round", class:"texfx"})); }
+  const glint=E("path",{d:dd, fill:"none", stroke:"#fff","stroke-width":w*.28, opacity:.22, "stroke-linecap":"round", class:"texfx"});
+  if(FXMOTION()) glint.appendChild(E("animate",{attributeName:"opacity", values:"0.12;0.34;0.12", dur:"5s", repeatCount:"indefinite"}));
+  layer.appendChild(glint); }
 // Scattered ground texture over a rect: grass tufts / dunes / rubble.
 function stipple(layer,x0,y0,x1,y1,n,seed,o={}){ const r=rng(seed), c=o.col||"var(--u-secondary)";
   for(let i=0;i<n;i++){ const x=x0+r()*(x1-x0), y=y0+r()*(y1-y0);
@@ -463,6 +467,15 @@ function compass(layer,x,y,rad){ const g=E("g",{transform:`translate(${x},${y})`
   g.appendChild(E("path",{d:`M0,${rad-2} L5,0 L0,-6 L-5,0 Z`, fill:"var(--u-secondary)", opacity:.6}));
   const n=E("text",{x:0,y:-rad-4,"text-anchor":"middle","font-size":11,fill:"var(--u-secondary)","font-family":"var(--font-serif)"}); n.textContent="N"; g.appendChild(n);
   layer.appendChild(g); }
+// Ornamental map cartouche (title panel) — antique-map decoration, themed per world.
+function cartouche(layer,x,y,w,title,subtitle){
+  const h=48, g=E("g",{transform:`translate(${x},${y})`});
+  g.appendChild(E("rect",{x:-w/2,y:-h/2,width:w,height:h,rx:7, fill:"var(--u-panel)","fill-opacity":.55, stroke:"var(--u-secondary)","stroke-width":1.5, filter:"url(#softsh)"}));
+  g.appendChild(E("rect",{x:-w/2+4,y:-h/2+4,width:w-8,height:h-8,rx:4, fill:"none", stroke:"var(--u-secondary)","stroke-width":.6, opacity:.55}));
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sy])=> g.appendChild(E("path",{d:`M${(sx*(w/2-4)).toFixed(1)},${(sy*(h/2-10)).toFixed(1)} q0,${(sy*6)} ${(-sx*6)},${(sy*6)}`, fill:"none", stroke:"var(--u-primary)","stroke-width":1.2, opacity:.8}))); // corner flourishes
+  const t=E("text",{x:0,y:-2,"text-anchor":"middle","font-family":"var(--font-serif)","font-size":17, fill:"var(--u-primary)"}); t.setAttribute("font-weight","600"); t.textContent=title; g.appendChild(t);
+  const s=E("text",{x:0,y:14,"text-anchor":"middle","font-family":"var(--font-ui)","font-size":9, fill:"var(--u-text)", opacity:.72}); s.setAttribute("letter-spacing","1.5"); s.textContent=subtitle; g.appendChild(s);
+  layer.appendChild(g); }
 
 const TERRAIN = {
   lotr({far,mid,near}){
@@ -476,11 +489,13 @@ const TERRAIN = {
     // Plains texture (Rohan grassland) + Eriador moor
     stipple(mid,400,430,600,560,120,51,{col:"var(--u-forest)",opacity:.16});
     stipple(mid,150,230,330,360,80,52,{col:"var(--u-secondary)",opacity:.13});
-    // Mountain ranges — Misty (N–S), White (E–W), Ered Lithui/Ephel Dúath (Mordor frame)
-    range(mid,[[452,150],[460,240],[468,330],[474,410]],{h:34,w:15,snow:true,seed:7});
-    range(mid,[[420,472],[510,478],[600,472],[688,466]],{h:30,w:15,snow:true,seed:8});
-    range(mid,[[672,318],[740,300],[810,306],[878,340]],{h:22,w:13,fill:"var(--u-danger)",opacity:.5,seed:9}); // Ered Lithui
-    range(mid,[[690,470],[740,500],[800,500],[860,470]],{h:20,w:12,fill:"var(--u-danger)",opacity:.5,seed:10}); // Ephel Dúath
+    // Mountain ranges — read as ranges of distinct peaks, not a solid wall:
+    // lower height + wider spacing, with a foothill ridge for depth.
+    range(mid,[[440,158],[452,232],[462,312],[470,392],[476,438]],{h:23,w:12,snow:true,seed:7,spacing:24}); // Misty Mts (main)
+    range(mid,[[462,196],[474,276],[484,352]],{h:13,w:10,seed:17,spacing:26,opacity:.5});                    // Misty foothills (east)
+    range(mid,[[416,476],[500,482],[586,478],[672,470],[700,464]],{h:20,w:12,snow:true,seed:8,spacing:26});  // White Mts (E–W)
+    range(mid,[[668,320],[738,302],[808,308],[876,342]],{h:17,w:12,fill:"var(--u-danger)",opacity:.5,seed:9,spacing:24}); // Ered Lithui
+    range(mid,[[690,472],[742,502],[802,502],[860,472]],{h:15,w:11,fill:"var(--u-danger)",opacity:.5,seed:10,spacing:24}); // Ephel Dúath
     // Mordor plateau + lava field + Mount Doom
     mid.appendChild(E("path",{d:"M700,340 C 800,326 866,360 872,432 C 877,494 820,516 744,502 C 694,492 676,432 700,340 Z", fill:"url(#dangerG)", opacity:.42}));
     stipple(mid,710,360,860,480,50,53,{col:"var(--u-danger)",opacity:.3});
@@ -495,7 +510,8 @@ const TERRAIN = {
     road(mid,[[128,214],[225,220],[305,192],[392,166]],{});
     road(mid,[[392,166],[456,252],[510,286]],{});
     road(mid,[[470,432],[540,470],[600,516],[600,560]],{dash:"3 7",opacity:.3});
-    region(mid,210,180,"Eriador"); region(mid,560,180,"Rhovanion",{size:16}); region(mid,470,548,"Rohan"); region(mid,612,592,"Gondor"); region(mid,792,462,"Mordor");
+    region(mid,205,205,"Eriador"); region(mid,590,175,"Rhovanion",{size:16}); region(mid,470,548,"Rohan"); region(mid,620,595,"Gondor"); region(mid,795,455,"Mordor");
+    cartouche(near,262,66,214,"Middle-earth","THE WAR OF THE RING · T.A. 3019");
   },
   hp({far,mid,near}){
     // Stylized Britain — narrow Highlands north, broad south, Irish Sea west.
@@ -505,12 +521,14 @@ const TERRAIN = {
     river(mid,[[510,540],[540,536],[566,548]],{w:2.6});              // Thames estuary
     river(mid,[[452,470],[420,500],[400,540]],{w:2.2});              // Severn
     stipple(mid,380,430,540,560,90,61,{col:"var(--u-forest)",opacity:.15}); // English lowland
-    range(mid,[[420,170],[456,196],[496,182],[512,210]],{h:26,w:14,snow:true,seed:31}); // Highlands
+    range(mid,[[418,172],[450,192],[482,184],[508,206]],{h:18,w:11,snow:true,seed:31,spacing:22}); // Highlands (lower, spread)
+    range(mid,[[430,232],[458,244]],{h:11,w:9,seed:37,spacing:20,opacity:.5});                      // Pennine foothills
     canopy(mid,460,236,30,26,48,33,"var(--u-forest)");   // Forbidden Forest
     canopy(mid,414,486,20,16,22,35);                      // Forest of Dean
     road(mid,[[540,520],[522,470],[502,400],[486,320],[478,254],[470,206]],{stroke:"var(--u-line)",w:1.8,dash:"2 7",opacity:.55}); // Hogwarts Express
-    region(mid,452,150,"Highlands"); region(mid,470,330,"The Midlands",{size:14}); region(mid,558,556,"London"); region(mid,388,588,"West Country");
+    region(mid,452,150,"Highlands"); region(mid,468,360,"The Midlands",{size:14}); region(mid,558,556,"London"); region(mid,388,592,"West Country");
     near.appendChild(E("path",{d:"M300,110 q10,-4 20,0 M840,150 q10,-4 20,0 M760,560 q10,-4 20,0", fill:"none", stroke:"var(--u-water)","stroke-width":1, opacity:.2, class:"texfx"}));
+    cartouche(near,742,168,206,"Wizarding Britain","HARRY'S STORY · 1991–1998");
   },
   matrix({far,mid,near}, layer){
     if(layer==="sim"){
@@ -530,7 +548,7 @@ const TERRAIN = {
       for(let i=0;i<16;i++){ const x=r()*1000, y=r()*380; const ln=E("line",{x1:x.toFixed(1),y1:y.toFixed(1),x2:x.toFixed(1),y2:(y+90).toFixed(1), stroke:"var(--u-primary)","stroke-width":1, opacity:.16, class:"texfx"});
         if(FXMOTION()){ const dur=(2.4+r()*3).toFixed(2)+"s"; ln.appendChild(E("animateTransform",{attributeName:"transform",type:"translate",from:"0 -160",to:"0 760",dur,repeatCount:"indefinite",begin:(-r()*4).toFixed(2)+"s"})); }
         near.appendChild(ln); }
-      region(mid,500,60,"The Simulation",{size:15});
+      cartouche(near,500,64,224,"The Simulation","SIMULATED · READS AS c.1999");
     } else {
       const r=rng(5);
       // Real world — a dark cavern: rock strata, tunnels, Zion, Machine City.
@@ -545,6 +563,7 @@ const TERRAIN = {
       mid.appendChild(E("circle",{cx:820,cy:300,r:60, fill:"none", stroke:"var(--u-danger)","stroke-width":1, opacity:.3}));
       mid.appendChild(E("circle",{cx:820,cy:300,r:34, fill:"url(#dangerG)", opacity:.45}));
       region(mid,300,466,"Zion"); region(mid,820,196,"01 · Machine City",{size:13});
+      cartouche(near,500,64,224,"The Real World","YEAR UNKNOWN · c.2199 DISPUTED");
       for(let i=0;i<50;i++){ const c=E("circle",{cx:(r()*1000).toFixed(1), cy:(r()*700).toFixed(1), r:.7, fill:"var(--u-danger)", opacity:.2+r()*.2, class:"texfx"});
         if(FXMOTION() && r()>.7){ c.appendChild(E("animate",{attributeName:"opacity",values:"0.1;0.5;0.1",dur:(1.5+r()*2).toFixed(2)+"s",repeatCount:"indefinite"})); }
         near.appendChild(c); }
