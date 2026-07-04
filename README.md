@@ -1,7 +1,7 @@
 # Chronomap
 
 Interactive timeline-map across three fictional universes — **Middle-earth**,
-**Wizarding Britain**, and **The Matrix**. Map and timeline stay synchronized;
+**Wizarding Britain**, and **Narnia**. Map and timeline stay synchronized;
 explore events, places, characters, factions, and journeys.
 
 **Zero runtime dependencies** — the whole app is a single `index.html`. Open it in
@@ -25,8 +25,12 @@ Settings → Pages → Source: Deploy from a branch → `main` / `(root)`).
   and a live viewport rectangle — click or drag it to jump anywhere, so the whole
   map stays legible at any zoom level.
 - **Four characters per world.** Frodo, Aragorn, Gandalf & Sam; Harry, Voldemort,
-  Hermione & Snape; Neo, Trinity, Morpheus & Agent Smith — each with their own
+  Hermione & Snape; Lucy, Edmund, Aslan & the White Witch — each with their own
   route and timeline presence.
+- **Framed, whole-map view.** Loads zoomed to fit the entire map inside its border
+  frame (compass, cartouche, and coastline all visible); zoom/pan to explore.
+- **Ambient audio.** An optional, procedurally-synthesized soundscape per world
+  (Web Audio — no asset files), off by default, crossfading as you switch worlds.
 - **Synchronized map + timeline.** Scrub or press play to watch events light up
   and journeys trace across the map.
 - **Contextual arrival effects.** When the timeline reaches an important event, a
