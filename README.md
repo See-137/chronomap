@@ -40,9 +40,12 @@ Settings → Pages → Source: Deploy from a branch → `main` / `(root)`).
 - **Low-power tier.** The `2D` toggle drops the SVG turbulence/elevation filters,
   parallax, ambient motion, camera easing, and playback frame-rate for weaker
   hardware. Motion also respects `prefers-reduced-motion`.
+- **Responsive.** On phones the controls collapse into a drawer (map leads), the
+  detail panel goes full-screen, search collapses to an icon, and tap targets grow
+  to ~44px. Event labels de-collide so titles never stack.
 - **Keyboard + screen-reader friendly.** Focusable map markers, a combobox search
-  with arrow-key navigation, focus management on the detail panel, and a visible
-  focus ring throughout.
+  with arrow-key navigation, focus management on the detail panel and mobile drawer,
+  a keyboard-operable minimap, and a visible focus ring throughout.
 
 ## Development
 
